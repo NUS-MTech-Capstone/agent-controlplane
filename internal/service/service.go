@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/catalog"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/clients"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/model"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/observability"
@@ -20,11 +21,6 @@ var (
 	ErrConflict   = store.ErrConflict
 	ErrForbidden  = errors.New("forbidden")
 	ErrBadRequest = errors.New("bad request")
-)
-
-var (
-	remediationOperations = []string{"restart_service"}
-	verifyOperations      = []string{"service_status", "health_check"}
 )
 
 type Store interface {
@@ -223,37 +219,52 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 	if err != nil {
 		return
 	}
-	if err := validateExecution(incident, approvedPlanHash); err != nil {
-		s.failExecution(ctx, incident, started, err)
-		return
-	}
-	_, _ = s.store.CreateEvent(ctx, incidentID, "RemediationStarted", "", "", "Approved remediation execution started.", map[string]any{"planHash": approvedPlanHash})
-	token, err := s.issueRunToken(ctx, incident.RunID, "remediate", remediationOperations, incident.PlanHash)
+	operation, err := validateExecution(incident, approvedPlanHash)
 	if err != nil {
 		s.failExecution(ctx, incident, started, err)
 		return
 	}
+	_, _ = s.store.CreateEvent(ctx, incidentID, "RemediationStarted", "", "", "Approved remediation execution started.", map[string]any{"planHash": approvedPlanHash})
+	token, err := s.issueRunToken(ctx, incident.RunID, "remediate", []string{operation}, incident.PlanHash)
+	if err != nil {
+		s.failExecution(ctx, incident, started, err)
+		return
+	}
+	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationTokenIssued", "", "", "Remediation capability token issued.", map[string]any{
+		"phase":             "remediate",
+		"allowedOperations": []string{operation},
+		"planHash":          incident.PlanHash,
+	})
 	operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
-	restart, err := s.dataplane.Execute(operationCtx, incident.OperationsURL, incident.RunID, token.CapabilityToken, "restart_service", incident.PlanHash)
+	remediation, err := s.dataplane.Execute(operationCtx, incident.OperationsURL, incident.RunID, token.CapabilityToken, operation, incident.PlanHash)
 	cancel()
 	if err != nil {
 		s.failExecution(ctx, incident, started, err)
 		return
 	}
-	restart.Stdout = truncate(restart.Stdout, s.maxOutputBytes)
-	restart.Stderr = truncate(restart.Stderr, s.maxOutputBytes)
-	if restart.ExitCode != 0 {
-		s.failExecution(ctx, incident, started, fmt.Errorf("restart_service failed with exit code %d: %s", restart.ExitCode, restart.Stderr))
+	remediation.Stdout = truncate(remediation.Stdout, s.maxOutputBytes)
+	remediation.Stderr = truncate(remediation.Stderr, s.maxOutputBytes)
+	if remediation.ExitCode != 0 {
+		s.failExecution(ctx, incident, started, fmt.Errorf("%s failed with exit code %d: %s", operation, remediation.ExitCode, remediation.Stderr))
 		return
 	}
-	verifyToken, err := s.issueRunToken(ctx, incident.RunID, "verify", verifyOperations, "")
+	_, _ = s.store.CreateEvent(ctx, incidentID, "OperationExecuted", "", "", "Approved remediation operation executed.", map[string]any{
+		"operation": operation,
+		"exitCode":  remediation.ExitCode,
+		"planHash":  incident.PlanHash,
+	})
+	verifyToken, err := s.issueRunToken(ctx, incident.RunID, "verify", catalog.VerifyOperations, "")
 	if err != nil {
 		s.failExecution(ctx, incident, started, err)
 		return
 	}
-	verification := make([]model.OperationResult, 0, len(verifyOperations))
+	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationTokenIssued", "", "", "Verification capability token issued.", map[string]any{
+		"phase":             "verify",
+		"allowedOperations": catalog.VerifyOperations,
+	})
+	verification := make([]model.OperationResult, 0, len(catalog.VerifyOperations))
 	success := true
-	for _, operation := range verifyOperations {
+	for _, operation := range catalog.VerifyOperations {
 		operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
 		result, err := s.dataplane.Execute(operationCtx, incident.OperationsURL, incident.RunID, verifyToken.CapabilityToken, operation, "")
 		cancel()
@@ -264,6 +275,10 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		result.Stderr = truncate(result.Stderr, s.maxOutputBytes)
 		verification = append(verification, result)
 		success = success && result.ExitCode == 0
+		_, _ = s.store.CreateEvent(ctx, incidentID, "VerificationOperationExecuted", "", "", "Post-remediation verification operation executed.", map[string]any{
+			"operation": operation,
+			"exitCode":  result.ExitCode,
+		})
 	}
 	state := model.IncidentCompleted
 	alertStatus := model.AlertResolved
@@ -277,8 +292,8 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		eventType = "RemediationFailed"
 		eventMessage = "Remediation verification failed."
 	}
-	report := buildReport(incident, restart, verification)
-	structured := buildStructuredReport(incident, restart, verification, state, started, s.now())
+	report := buildReport(incident, remediation, verification)
+	structured := buildStructuredReport(incident, remediation, verification, state, started, s.now())
 	_ = s.store.SetIncidentReport(ctx, incidentID, state, report, errorMessage, structured)
 	_ = s.store.SetAlertStatusForIncident(ctx, incidentID, alertStatus, errorMessage)
 	_, _ = s.store.CreateEvent(ctx, incidentID, eventType, "", "", eventMessage, map[string]any{"planHash": incident.PlanHash})
@@ -290,6 +305,7 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 	}
 	_, _ = s.store.CreateEvent(ctx, incidentID, verifyEvent, "", "", verifyMessage, map[string]any{"operationCount": len(verification)})
 	_ = s.CloseAutomationRun(ctx, incident.RunID, verifyToken.CapabilityToken)
+	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationRunClosed", "", "", "Automation run closed after remediation workflow.", map[string]any{"runId": incident.RunID})
 	slog.InfoContext(ctx, eventType, "requestId", observability.RequestID(ctx), "incidentId", incidentID, "runId", incident.RunID, "hostId", incident.HostID, "planHash", incident.PlanHash)
 }
 
@@ -410,34 +426,34 @@ func planExpired(incident model.Incident, now time.Time) bool {
 	return incident.PlanExpiresAt != nil && !incident.PlanExpiresAt.After(now)
 }
 
-func validateExecution(incident model.Incident, approvedPlanHash string) error {
+func validateExecution(incident model.Incident, approvedPlanHash string) (string, error) {
 	if incident.State != model.IncidentExecuting {
-		return errors.New("incident is not approved for execution")
+		return "", errors.New("incident is not approved for execution")
 	}
 	if incident.PlanHash == "" || incident.PlanHash != approvedPlanHash {
-		return errors.New("approved plan hash mismatch")
+		return "", errors.New("approved plan hash mismatch")
 	}
 	if incident.RunID == "" || incident.OperationsURL == "" {
-		return errors.New("incident has no automation run")
+		return "", errors.New("incident has no automation run")
 	}
-	if len(incident.Plan.Actions) != 1 || incident.Plan.Actions[0].OperationID != "restart_service" {
-		return errors.New("approved plan is outside the remediation allowlist")
+	if len(incident.Plan.Actions) != 1 || !catalog.IsRemediation(incident.Plan.Actions[0].OperationID) {
+		return "", errors.New("approved plan is outside the remediation catalog")
 	}
-	return nil
+	return incident.Plan.Actions[0].OperationID, nil
 }
 
-func buildReport(incident model.Incident, restart model.OperationResult, verification []model.OperationResult) string {
+func buildReport(incident model.Incident, remediation model.OperationResult, verification []model.OperationResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Incident %s on host %s\n\n", incident.ID, incident.HostID)
 	fmt.Fprintf(&b, "Approved plan: %s\n", incident.Plan.Summary)
-	fmt.Fprintf(&b, "Remediation: restart_service exit=%d\n", restart.ExitCode)
+	fmt.Fprintf(&b, "Remediation: %s exit=%d\n", remediation.OperationID, remediation.ExitCode)
 	for _, result := range verification {
 		fmt.Fprintf(&b, "Verification: %s exit=%d\n", result.OperationID, result.ExitCode)
 	}
 	return b.String()
 }
 
-func buildStructuredReport(incident model.Incident, restart model.OperationResult, verification []model.OperationResult, state model.IncidentState, started, resolved time.Time) model.PostIncidentReport {
+func buildStructuredReport(incident model.Incident, remediation model.OperationResult, verification []model.OperationResult, state model.IncidentState, started, resolved time.Time) model.PostIncidentReport {
 	verificationSummary := make([]string, 0, len(verification))
 	for _, result := range verification {
 		verificationSummary = append(verificationSummary, fmt.Sprintf("%s exit=%d", result.OperationID, result.ExitCode))
@@ -445,7 +461,7 @@ func buildStructuredReport(incident model.Incident, restart model.OperationResul
 	duration := resolved.Sub(started).Seconds()
 	return model.PostIncidentReport{
 		RootCauseSummary:    rootCauseSummary(incident),
-		ActionTaken:         fmt.Sprintf("restart_service exit=%d", restart.ExitCode),
+		ActionTaken:         fmt.Sprintf("%s exit=%d", remediation.OperationID, remediation.ExitCode),
 		VerificationSummary: strings.Join(verificationSummary, ", "),
 		FinalState:          string(state),
 		StartedAt:           &started,

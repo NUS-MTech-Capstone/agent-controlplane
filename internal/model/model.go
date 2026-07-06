@@ -71,6 +71,54 @@ type OperationResult struct {
 	ExitCode    int    `json:"exitCode"`
 }
 
+type ExplanationModel struct {
+	Provider        string            `json:"provider"`
+	PlannerType     string            `json:"plannerType"`
+	ModelID         string            `json:"modelId"`
+	AWSRegion       string            `json:"awsRegion"`
+	Temperature     *float64          `json:"temperature"`
+	MaxPromptBytes  int               `json:"maxPromptBytes"`
+	PromptTemplates map[string]string `json:"promptTemplates"`
+}
+
+type ExplanationWorkflow struct {
+	GraphVersion           string   `json:"graphVersion"`
+	CatalogVersion         string   `json:"catalogVersion"`
+	DiagnosticOperations   []string `json:"diagnosticOperations"`
+	VerificationOperations []string `json:"verificationOperations"`
+	RunID                  string   `json:"runId"`
+	PlanHash               string   `json:"planHash"`
+}
+
+type ExplanationToolDecision struct {
+	OperationID string `json:"operationId"`
+	Phase       string `json:"phase"`
+	ChosenBy    string `json:"chosenBy"`
+	Reason      string `json:"reason"`
+}
+
+type ExplanationGuardrail struct {
+	Name   string `json:"name"`
+	Passed bool   `json:"passed"`
+	Reason string `json:"reason"`
+}
+
+type ExplanationResponsibility struct {
+	ModelAdvisory         bool   `json:"modelAdvisory"`
+	HumanApprovalRequired bool   `json:"humanApprovalRequired"`
+	ExecutionOwner        string `json:"executionOwner"`
+	TokenIssuer           string `json:"tokenIssuer"`
+	TerminalTraffic       string `json:"terminalTraffic"`
+}
+
+type IncidentExplanation struct {
+	Model          ExplanationModel          `json:"model"`
+	Workflow       ExplanationWorkflow       `json:"workflow"`
+	ToolDecisions  []ExplanationToolDecision `json:"toolDecisions"`
+	Guardrails     []ExplanationGuardrail    `json:"guardrails"`
+	Responsibility ExplanationResponsibility `json:"responsibility"`
+}
+
 type PostIncidentReport struct {
 	RootCauseSummary    string     `json:"rootCauseSummary"`
 	ActionTaken         string     `json:"actionTaken"`
@@ -82,29 +130,30 @@ type PostIncidentReport struct {
 }
 
 type Incident struct {
-	ID                 string             `json:"id"`
-	SourceID           string             `json:"sourceId"`
-	AlarmARN           string             `json:"alarmArn"`
-	AlarmName          string             `json:"alarmName"`
-	HostID             string             `json:"hostId"`
-	RunbookVersion     string             `json:"runbookVersion"`
-	State              IncidentState      `json:"state"`
-	Reason             string             `json:"reason"`
-	RunID              string             `json:"-"`
-	OperationsURL      string             `json:"-"`
-	Evidence           []OperationResult  `json:"evidence"`
-	Triage             *TriageResult      `json:"triage"`
-	Plan               Plan               `json:"plan"`
-	PlanHash           string             `json:"planHash"`
-	PlanExpiresAt      *time.Time         `json:"planExpiresAt"`
-	ApproverSubject    string             `json:"approverSubject"`
-	ApprovalDecision   string             `json:"approvalDecision"`
-	ApprovalAt         *time.Time         `json:"approvalAt"`
-	Report             string             `json:"report"`
-	PostIncidentReport PostIncidentReport `json:"postIncidentReport"`
-	ErrorMessage       string             `json:"errorMessage"`
-	CreatedAt          time.Time          `json:"createdAt"`
-	UpdatedAt          time.Time          `json:"updatedAt"`
+	ID                 string              `json:"id"`
+	SourceID           string              `json:"sourceId"`
+	AlarmARN           string              `json:"alarmArn"`
+	AlarmName          string              `json:"alarmName"`
+	HostID             string              `json:"hostId"`
+	RunbookVersion     string              `json:"runbookVersion"`
+	State              IncidentState       `json:"state"`
+	Reason             string              `json:"reason"`
+	RunID              string              `json:"-"`
+	OperationsURL      string              `json:"-"`
+	Evidence           []OperationResult   `json:"evidence"`
+	Triage             *TriageResult       `json:"triage"`
+	Plan               Plan                `json:"plan"`
+	PlanHash           string              `json:"planHash"`
+	Explanation        IncidentExplanation `json:"explanation"`
+	PlanExpiresAt      *time.Time          `json:"planExpiresAt"`
+	ApproverSubject    string              `json:"approverSubject"`
+	ApprovalDecision   string              `json:"approvalDecision"`
+	ApprovalAt         *time.Time          `json:"approvalAt"`
+	Report             string              `json:"report"`
+	PostIncidentReport PostIncidentReport  `json:"postIncidentReport"`
+	ErrorMessage       string              `json:"errorMessage"`
+	CreatedAt          time.Time           `json:"createdAt"`
+	UpdatedAt          time.Time           `json:"updatedAt"`
 }
 
 type ManagedAlert struct {

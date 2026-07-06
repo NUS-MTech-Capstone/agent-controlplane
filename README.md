@@ -65,9 +65,19 @@ GET /openapi.yaml
 
 Approval and rejection require a Cognito user in `Manager` or `Admin`.
 Approval checks the exact stored `planHash`, records an approval decision, and
-only executes the fixed `restart_service` operation followed by bounded
-verification operations. Automation authority still comes from STS capability
-tokens and Session Manager run assignment metadata.
+executes only the single approved operation from the code-reviewed v1
+remediation catalog, followed by bounded verification operations. Automation
+authority still comes from STS capability tokens and Session Manager run
+assignment metadata; managers approve plans, they do not create runtime
+actions.
+
+Incident detail responses include an additive `explanation` object populated by
+Incident Agent. It shows safe model metadata, catalog version, diagnostic and
+verification operation IDs, tool-selection reasons, guardrail outcomes, and
+responsibility boundaries. Agent Control Plane also records timeline metadata
+for automation token issuance, approved operation execution, verification
+operations, and automation run closeout. Tokens, command bodies, prompts, raw
+model responses, secrets, and terminal streams are never returned.
 
 ## Development
 
@@ -75,4 +85,3 @@ tokens and Session Manager run assignment metadata.
 go test ./...
 go run ./cmd/server
 ```
-

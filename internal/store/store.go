@@ -273,7 +273,7 @@ where id=$4 and state in ($5,$6)`, string(model.IncidentFailed), message, s.now(
 
 func incidentSelect() string {
 	return `select id, source_id, alarm_arn, alarm_name, host_id, runbook_version, state, reason,
-run_id, operations_url, evidence_json, triage_json, plan_json, plan_hash, plan_expires_at,
+run_id, operations_url, evidence_json, triage_json, plan_json, plan_hash, explanation_json, plan_expires_at,
 approver_subject, approval_decision, approval_at, report, report_json, error_message, created_at, updated_at from incidents`
 }
 
@@ -295,11 +295,11 @@ func scanAlert(row scanner) (model.ManagedAlert, error) {
 func scanIncident(row scanner) (model.Incident, error) {
 	var incident model.Incident
 	var state string
-	var evidenceJSON, triageJSON, planJSON, reportJSON []byte
+	var evidenceJSON, triageJSON, planJSON, explanationJSON, reportJSON []byte
 	err := row.Scan(&incident.ID, &incident.SourceID, &incident.AlarmARN, &incident.AlarmName,
 		&incident.HostID, &incident.RunbookVersion, &state, &incident.Reason, &incident.RunID,
 		&incident.OperationsURL, &evidenceJSON, &triageJSON, &planJSON, &incident.PlanHash,
-		&incident.PlanExpiresAt, &incident.ApproverSubject, &incident.ApprovalDecision,
+		&explanationJSON, &incident.PlanExpiresAt, &incident.ApproverSubject, &incident.ApprovalDecision,
 		&incident.ApprovalAt, &incident.Report, &reportJSON, &incident.ErrorMessage,
 		&incident.CreatedAt, &incident.UpdatedAt)
 	if err != nil {
@@ -308,6 +308,7 @@ func scanIncident(row scanner) (model.Incident, error) {
 	incident.State = model.IncidentState(state)
 	_ = json.Unmarshal(defaultJSON(evidenceJSON, "[]"), &incident.Evidence)
 	_ = json.Unmarshal(defaultJSON(planJSON, "{}"), &incident.Plan)
+	_ = json.Unmarshal(defaultJSON(explanationJSON, "{}"), &incident.Explanation)
 	if len(triageJSON) > 0 && string(triageJSON) != "{}" {
 		var triage model.TriageResult
 		if err := json.Unmarshal(triageJSON, &triage); err == nil {

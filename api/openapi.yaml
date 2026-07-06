@@ -70,6 +70,13 @@ paths:
       responses:
         "200":
           description: Incident detail or HTML page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  explanation:
+                    $ref: "#/components/schemas/IncidentExplanation"
         "404":
           description: Incident not found.
   /incidents/{incidentId}/approve:
@@ -145,4 +152,57 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-
+  schemas:
+    IncidentExplanation:
+      type: object
+      properties:
+        model:
+          type: object
+          properties:
+            provider: { type: string }
+            plannerType: { type: string }
+            modelId: { type: string }
+            awsRegion: { type: string }
+            temperature: { type: number, nullable: true }
+            maxPromptBytes: { type: integer }
+            promptTemplates:
+              type: object
+              additionalProperties: { type: string }
+        workflow:
+          type: object
+          properties:
+            graphVersion: { type: string }
+            catalogVersion: { type: string }
+            diagnosticOperations:
+              type: array
+              items: { type: string }
+            verificationOperations:
+              type: array
+              items: { type: string }
+            runId: { type: string }
+            planHash: { type: string }
+        toolDecisions:
+          type: array
+          items:
+            type: object
+            properties:
+              operationId: { type: string }
+              phase: { type: string }
+              chosenBy: { type: string }
+              reason: { type: string }
+        guardrails:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              passed: { type: boolean }
+              reason: { type: string }
+        responsibility:
+          type: object
+          properties:
+            modelAdvisory: { type: boolean }
+            humanApprovalRequired: { type: boolean }
+            executionOwner: { type: string }
+            tokenIssuer: { type: string }
+            terminalTraffic: { type: string }

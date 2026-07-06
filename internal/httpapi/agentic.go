@@ -128,6 +128,7 @@ func (s *Server) incidentDetail(w http.ResponseWriter, r *http.Request, incident
 		plan = fmt.Sprintf("<div class='card'><h2>Proposed plan</h2><p><b>%s</b></p><p>%s</p>%s</div>",
 			html.EscapeString(detail.Plan.Summary), html.EscapeString(detail.Plan.Rationale), actions)
 	}
+	explanation := renderExplanation(detail.Explanation)
 	decision := ""
 	if detail.State == model.IncidentAwaitingApproval && canDecideUI(user.Groups) {
 		decision = fmt.Sprintf("<form method='post' action='/incidents/%s/approve'><input type='hidden' name='planHash' value='%s'><button class='approve' type='submit'>Approve exact plan</button></form><form method='post' action='/incidents/%s/reject'><input type='hidden' name='planHash' value='%s'><button class='danger' type='submit'>Reject</button></form>",
@@ -141,6 +142,7 @@ func (s *Server) incidentDetail(w http.ResponseWriter, r *http.Request, incident
 	body := fmt.Sprintf("<p><a href='/incidents'>Back</a></p><h1>%s</h1><div class='card'><b>State:</b> %s<br><b>Host:</b> %s<br><b>Reason:</b> %s</div>%s%s",
 		html.EscapeString(detail.AlarmName), html.EscapeString(string(detail.State)), html.EscapeString(detail.HostID),
 		html.EscapeString(detail.Reason), plan, decision)
+	body += explanation
 	if evidence != "" {
 		body += "<h2>Evidence</h2>" + evidence
 	}
@@ -223,6 +225,45 @@ func parseIncidentPath(path string) (string, string) {
 		return parts[1], parts[2]
 	}
 	return "", ""
+}
+
+func renderExplanation(explanation model.IncidentExplanation) string {
+	if explanation.Model.PlannerType == "" && explanation.Workflow.CatalogVersion == "" &&
+		len(explanation.ToolDecisions) == 0 && len(explanation.Guardrails) == 0 {
+		return ""
+	}
+	tools := ""
+	for _, decision := range explanation.ToolDecisions {
+		tools += fmt.Sprintf("<p><code>%s</code> %s/%s: %s</p>",
+			html.EscapeString(decision.OperationID),
+			html.EscapeString(decision.Phase),
+			html.EscapeString(decision.ChosenBy),
+			html.EscapeString(decision.Reason))
+	}
+	guardrails := ""
+	for _, guardrail := range explanation.Guardrails {
+		status := "failed"
+		if guardrail.Passed {
+			status = "passed"
+		}
+		guardrails += fmt.Sprintf("<p><code>%s</code> %s: %s</p>",
+			html.EscapeString(guardrail.Name),
+			html.EscapeString(status),
+			html.EscapeString(guardrail.Reason))
+	}
+	return fmt.Sprintf(
+		"<div class='card'><h2>Explainability</h2><p><b>Planner:</b> %s (%s)</p><p><b>Model:</b> %s %s</p><p><b>Catalog:</b> %s</p><p><b>Responsibility:</b> execution owner %s, token issuer %s, terminal traffic %s</p>%s%s</div>",
+		html.EscapeString(explanation.Model.PlannerType),
+		html.EscapeString(explanation.Model.Provider),
+		html.EscapeString(explanation.Model.ModelID),
+		html.EscapeString(explanation.Model.AWSRegion),
+		html.EscapeString(explanation.Workflow.CatalogVersion),
+		html.EscapeString(explanation.Responsibility.ExecutionOwner),
+		html.EscapeString(explanation.Responsibility.TokenIssuer),
+		html.EscapeString(explanation.Responsibility.TerminalTraffic),
+		tools,
+		guardrails,
+	)
 }
 
 func canDecideUI(groups []string) bool {
