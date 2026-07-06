@@ -31,6 +31,31 @@ paths:
       summary: List managed-server alerts
       security:
         - albCognito: []
+      parameters:
+        - name: incidentId
+          in: query
+          schema: { type: string }
+        - name: hostId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: cloudwatchState
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: Alert list.
@@ -54,9 +79,67 @@ paths:
       summary: List incidents
       security:
         - albCognito: []
+      parameters:
+        - name: incidentId
+          in: query
+          schema: { type: string }
+        - name: alertId
+          in: query
+          schema: { type: string }
+        - name: hostId
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: Incident list or HTML page.
+  /incidents/events:
+    get:
+      summary: Query Agentic AI incident timeline metadata events
+      security:
+        - albCognito: []
+      parameters:
+        - name: incidentId
+          in: query
+          schema: { type: string }
+        - name: alertId
+          in: query
+          schema: { type: string }
+        - name: eventType
+          in: query
+          schema: { type: string }
+        - name: actor
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Metadata event list without prompts, tokens, secrets, or terminal streams.
   /incidents/{incidentId}:
     get:
       summary: Get one incident

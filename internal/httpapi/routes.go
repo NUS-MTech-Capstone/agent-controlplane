@@ -16,6 +16,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /alerts", cognitoMiddleware(s.identityVerifier, http.HandlerFunc(s.listAlerts)))
 	s.mux.Handle("GET /alerts/", cognitoMiddleware(s.identityVerifier, http.HandlerFunc(s.alertDetail)))
 	s.mux.Handle("GET /incidents", cognitoMiddleware(s.identityVerifier, http.HandlerFunc(s.listIncidents)))
+	s.mux.Handle("GET /incidents/events", cognitoMiddleware(s.identityVerifier, http.HandlerFunc(s.listIncidentEvents)))
 	s.mux.Handle("GET /incidents/", cognitoMiddleware(s.identityVerifier, http.HandlerFunc(s.incidentAction)))
 	s.mux.Handle("POST /incidents/", cognitoMiddleware(s.identityVerifier, http.HandlerFunc(s.incidentAction)))
 	s.mux.HandleFunc("POST /automation/runs/start", s.startAutomationRun)

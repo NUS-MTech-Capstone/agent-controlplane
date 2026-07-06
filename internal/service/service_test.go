@@ -119,27 +119,89 @@ func TestIncidentExplanationJSONShape(t *testing.T) {
 	}
 }
 
+func TestListQueriesApplyFiltersAndCursors(t *testing.T) {
+	store := &executeStore{
+		alerts: []model.ManagedAlert{
+			{ID: "alert-1"},
+			{ID: "alert-2"},
+		},
+		incidents: []model.Incident{
+			{ID: "inc-1"},
+			{ID: "inc-2"},
+		},
+		incidentEvents: []model.IncidentEvent{
+			{ID: "evt-1"},
+			{ID: "evt-2"},
+		},
+	}
+	svc := New(store, nil, nil, nil, nil, "", time.Second, 4096)
+	from := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
+
+	alerts, err := svc.ListAlerts(t.Context(), model.AlertFilter{
+		IncidentID: "inc-1", HostID: "host-1", Status: "PENDING_APPROVAL",
+		CloudWatchState: "ALARM", From: from, Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListAlerts() error = %v", err)
+	}
+	if alerts.NextCursor != "2" || store.alertFilter.IncidentID != "inc-1" || !store.alertFilter.From.Equal(from) {
+		t.Fatalf("alerts=%#v filter=%#v", alerts, store.alertFilter)
+	}
+
+	incidents, err := svc.ListIncidents(t.Context(), model.IncidentFilter{
+		IncidentID: "inc-1", AlertID: "alert-1", HostID: "host-1", State: "FAILED", Limit: 2, Offset: 4,
+	})
+	if err != nil {
+		t.Fatalf("ListIncidents() error = %v", err)
+	}
+	if incidents.NextCursor != "6" || store.incidentFilter.AlertID != "alert-1" || len(incidents.Incidents) != 2 {
+		t.Fatalf("incidents=%#v filter=%#v", incidents, store.incidentFilter)
+	}
+
+	events, err := svc.ListIncidentEvents(t.Context(), model.IncidentEventFilter{
+		IncidentID: "inc-1", AlertID: "alert-1", EventType: "PlanApproved", Actor: "user-1", Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListIncidentEvents() error = %v", err)
+	}
+	if events.NextCursor != "2" || store.eventFilter.EventType != "PlanApproved" || len(events.Events) != 2 {
+		t.Fatalf("events=%#v filter=%#v", events, store.eventFilter)
+	}
+}
+
 type executeStore struct {
-	incident model.Incident
-	report   model.PostIncidentReport
-	events   []string
+	incident       model.Incident
+	alerts         []model.ManagedAlert
+	incidents      []model.Incident
+	incidentEvents []model.IncidentEvent
+	alertFilter    model.AlertFilter
+	incidentFilter model.IncidentFilter
+	eventFilter    model.IncidentEventFilter
+	report         model.PostIncidentReport
+	events         []string
 }
 
 func (s *executeStore) Ping(context.Context) error { return nil }
-func (s *executeStore) ListAlerts(context.Context, int) ([]model.ManagedAlert, error) {
-	return nil, nil
+func (s *executeStore) ListAlerts(_ context.Context, filter model.AlertFilter) ([]model.ManagedAlert, error) {
+	s.alertFilter = filter
+	return s.alerts, nil
 }
 func (s *executeStore) GetAlert(context.Context, string) (model.ManagedAlert, error) {
 	return model.ManagedAlert{}, nil
 }
-func (s *executeStore) ListIncidents(context.Context, int) ([]model.Incident, error) {
-	return nil, nil
+func (s *executeStore) ListIncidents(_ context.Context, filter model.IncidentFilter) ([]model.Incident, error) {
+	s.incidentFilter = filter
+	return s.incidents, nil
 }
 func (s *executeStore) GetIncident(context.Context, string) (model.Incident, error) {
 	return s.incident, nil
 }
 func (s *executeStore) ListEvents(context.Context, string) ([]model.IncidentEvent, error) {
 	return nil, nil
+}
+func (s *executeStore) ListIncidentEvents(_ context.Context, filter model.IncidentEventFilter) ([]model.IncidentEvent, error) {
+	s.eventFilter = filter
+	return s.incidentEvents, nil
 }
 func (s *executeStore) ListApprovalDecisions(context.Context, string) ([]model.ApprovalDecisionAudit, error) {
 	return nil, nil

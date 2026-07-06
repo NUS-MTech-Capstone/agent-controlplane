@@ -25,12 +25,16 @@ func (s *Server) agenticHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := s.svc.ListAlerts(r.Context())
+	filter, ok := alertFilterFromQuery(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.svc.ListAlerts(r.Context(), filter)
 	if err != nil {
 		writeError(w, statusForError(err), err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, model.AlertListResponse{Alerts: alerts})
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) alertDetail(w http.ResponseWriter, r *http.Request) {
@@ -49,25 +53,21 @@ func (s *Server) alertDetail(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
 	user, _ := cognitoUserFromContext(r.Context())
-	incidents, err := s.svc.ListIncidents(r.Context())
+	filter, ok := incidentFilterFromQuery(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.svc.ListIncidents(r.Context(), filter)
 	if err != nil {
 		writeError(w, statusForError(err), err.Error())
 		return
 	}
 	if wantsJSON(r) {
-		summaries := make([]model.IncidentSummary, 0, len(incidents))
-		for _, incident := range incidents {
-			summaries = append(summaries, model.IncidentSummary{
-				ID: incident.ID, AlarmName: incident.AlarmName, HostID: incident.HostID,
-				State: incident.State, PlanHash: incident.PlanHash, PlanExpiresAt: incident.PlanExpiresAt,
-				CreatedAt: incident.CreatedAt, UpdatedAt: incident.UpdatedAt, ErrorMessage: incident.ErrorMessage,
-			})
-		}
-		writeJSON(w, http.StatusOK, model.IncidentListResponse{Incidents: summaries})
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	rows := ""
-	for _, incident := range incidents {
+	for _, incident := range response.Incidents {
 		rows += fmt.Sprintf("<tr><td>%s</td><td><a href='/incidents/%s'>%s</a></td><td>%s</td><td class='state'>%s</td></tr>",
 			html.EscapeString(incident.CreatedAt.String()),
 			url.PathEscape(incident.ID),
@@ -82,6 +82,19 @@ func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, http.StatusOK, page("Incidents",
 		fmt.Sprintf("<h1>Incidents</h1><p>Signed in as %s</p><table><thead><tr><th>Created</th><th>Alarm</th><th>Host</th><th>State</th></tr></thead><tbody>%s</tbody></table>",
 			html.EscapeString(user.Email), rows)))
+}
+
+func (s *Server) listIncidentEvents(w http.ResponseWriter, r *http.Request) {
+	filter, ok := incidentEventFilterFromQuery(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.svc.ListIncidentEvents(r.Context(), filter)
+	if err != nil {
+		writeError(w, statusForError(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) incidentAction(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +218,78 @@ func planHashFromRequest(r *http.Request) (string, error) {
 		return "", io.ErrUnexpectedEOF
 	}
 	return planHash, nil
+}
+
+func alertFilterFromQuery(w http.ResponseWriter, r *http.Request) (model.AlertFilter, bool) {
+	query := r.URL.Query()
+	from, err := parseOptionalTime(query.Get("from"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from must be RFC3339")
+		return model.AlertFilter{}, false
+	}
+	to, err := parseOptionalTime(query.Get("to"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to must be RFC3339")
+		return model.AlertFilter{}, false
+	}
+	return model.AlertFilter{
+		IncidentID:      query.Get("incidentId"),
+		HostID:          query.Get("hostId"),
+		Status:          query.Get("status"),
+		CloudWatchState: query.Get("cloudwatchState"),
+		From:            from,
+		To:              to,
+		Limit:           parsePositiveInt(query.Get("limit"), 100),
+		Offset:          parsePositiveInt(query.Get("cursor"), 0),
+	}, true
+}
+
+func incidentFilterFromQuery(w http.ResponseWriter, r *http.Request) (model.IncidentFilter, bool) {
+	query := r.URL.Query()
+	from, err := parseOptionalTime(query.Get("from"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from must be RFC3339")
+		return model.IncidentFilter{}, false
+	}
+	to, err := parseOptionalTime(query.Get("to"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to must be RFC3339")
+		return model.IncidentFilter{}, false
+	}
+	return model.IncidentFilter{
+		IncidentID: query.Get("incidentId"),
+		AlertID:    query.Get("alertId"),
+		HostID:     query.Get("hostId"),
+		State:      query.Get("state"),
+		From:       from,
+		To:         to,
+		Limit:      parsePositiveInt(query.Get("limit"), 100),
+		Offset:     parsePositiveInt(query.Get("cursor"), 0),
+	}, true
+}
+
+func incidentEventFilterFromQuery(w http.ResponseWriter, r *http.Request) (model.IncidentEventFilter, bool) {
+	query := r.URL.Query()
+	from, err := parseOptionalTime(query.Get("from"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from must be RFC3339")
+		return model.IncidentEventFilter{}, false
+	}
+	to, err := parseOptionalTime(query.Get("to"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to must be RFC3339")
+		return model.IncidentEventFilter{}, false
+	}
+	return model.IncidentEventFilter{
+		IncidentID: query.Get("incidentId"),
+		AlertID:    query.Get("alertId"),
+		EventType:  query.Get("eventType"),
+		Actor:      query.Get("actor"),
+		From:       from,
+		To:         to,
+		Limit:      parsePositiveInt(query.Get("limit"), 100),
+		Offset:     parsePositiveInt(query.Get("cursor"), 0),
+	}, true
 }
 
 func wantsJSON(r *http.Request) bool {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,11 +26,12 @@ var (
 
 type Store interface {
 	Ping(context.Context) error
-	ListAlerts(context.Context, int) ([]model.ManagedAlert, error)
+	ListAlerts(context.Context, model.AlertFilter) ([]model.ManagedAlert, error)
 	GetAlert(context.Context, string) (model.ManagedAlert, error)
-	ListIncidents(context.Context, int) ([]model.Incident, error)
+	ListIncidents(context.Context, model.IncidentFilter) ([]model.Incident, error)
 	GetIncident(context.Context, string) (model.Incident, error)
 	ListEvents(context.Context, string) ([]model.IncidentEvent, error)
+	ListIncidentEvents(context.Context, model.IncidentEventFilter) ([]model.IncidentEvent, error)
 	ListApprovalDecisions(context.Context, string) ([]model.ApprovalDecisionAudit, error)
 	IncidentCounts(context.Context) (int, int, error)
 	LastAlertProcessedAt(context.Context) (*time.Time, error)
@@ -112,8 +114,27 @@ func (s *Service) Health(ctx context.Context) model.AgentHealth {
 	return health
 }
 
-func (s *Service) ListAlerts(ctx context.Context) ([]model.ManagedAlert, error) {
-	return s.store.ListAlerts(ctx, 100)
+func boundedLimit(value, fallback, max int) int {
+	if value <= 0 {
+		return fallback
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func (s *Service) ListAlerts(ctx context.Context, filter model.AlertFilter) (model.AlertListResponse, error) {
+	filter.Limit = boundedLimit(filter.Limit, 100, 200)
+	alerts, err := s.store.ListAlerts(ctx, filter)
+	if err != nil {
+		return model.AlertListResponse{}, err
+	}
+	response := model.AlertListResponse{Alerts: alerts}
+	if len(alerts) == filter.Limit {
+		response.NextCursor = strconv.Itoa(filter.Offset + len(alerts))
+	}
+	return response, nil
 }
 
 func (s *Service) GetAlertDetail(ctx context.Context, alertID string) (model.AlertDetail, error) {
@@ -132,8 +153,25 @@ func (s *Service) GetAlertDetail(ctx context.Context, alertID string) (model.Ale
 	return detail, nil
 }
 
-func (s *Service) ListIncidents(ctx context.Context) ([]model.Incident, error) {
-	return s.store.ListIncidents(ctx, 100)
+func (s *Service) ListIncidents(ctx context.Context, filter model.IncidentFilter) (model.IncidentListResponse, error) {
+	filter.Limit = boundedLimit(filter.Limit, 100, 200)
+	incidents, err := s.store.ListIncidents(ctx, filter)
+	if err != nil {
+		return model.IncidentListResponse{}, err
+	}
+	summaries := make([]model.IncidentSummary, 0, len(incidents))
+	for _, incident := range incidents {
+		summaries = append(summaries, model.IncidentSummary{
+			ID: incident.ID, AlarmName: incident.AlarmName, HostID: incident.HostID,
+			State: incident.State, PlanHash: incident.PlanHash, PlanExpiresAt: incident.PlanExpiresAt,
+			CreatedAt: incident.CreatedAt, UpdatedAt: incident.UpdatedAt, ErrorMessage: incident.ErrorMessage,
+		})
+	}
+	response := model.IncidentListResponse{Incidents: summaries}
+	if len(incidents) == filter.Limit {
+		response.NextCursor = strconv.Itoa(filter.Offset + len(incidents))
+	}
+	return response, nil
 }
 
 func (s *Service) GetIncidentDetail(ctx context.Context, incidentID string) (model.IncidentDetail, error) {
@@ -150,6 +188,19 @@ func (s *Service) GetIncidentDetail(ctx context.Context, incidentID string) (mod
 		return model.IncidentDetail{}, err
 	}
 	return model.IncidentDetail{Incident: incident, Timeline: timeline, ApprovalDecisions: decisions}, nil
+}
+
+func (s *Service) ListIncidentEvents(ctx context.Context, filter model.IncidentEventFilter) (model.IncidentEventListResponse, error) {
+	filter.Limit = boundedLimit(filter.Limit, 100, 200)
+	events, err := s.store.ListIncidentEvents(ctx, filter)
+	if err != nil {
+		return model.IncidentEventListResponse{}, err
+	}
+	response := model.IncidentEventListResponse{Events: events}
+	if len(events) == filter.Limit {
+		response.NextCursor = strconv.Itoa(filter.Offset + len(events))
+	}
+	return response, nil
 }
 
 func (s *Service) Approve(ctx context.Context, incidentID, planHash, subject string, groups []string) (model.IncidentDetail, error) {

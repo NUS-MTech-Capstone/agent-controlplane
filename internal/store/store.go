@@ -39,13 +39,22 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
-func (s *Store) ListAlerts(ctx context.Context, limit int) ([]model.ManagedAlert, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 100
+func (s *Store) ListAlerts(ctx context.Context, filter model.AlertFilter) ([]model.ManagedAlert, error) {
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = 100
 	}
 	rows, err := s.pool.Query(ctx, `select id, source_id, source_type, alarm_arn, alarm_name, cloudwatch_state,
 host_id, reason, status, group_key, incident_id, grouped, error_summary, occurred_at, created_at, updated_at
-from alerts order by occurred_at desc limit $1`, limit)
+from alerts
+where ($1 = '' or incident_id = $1)
+	and ($2 = '' or host_id = $2)
+	and ($3 = '' or status = $3)
+	and ($4 = '' or cloudwatch_state = $4)
+	and ($5::timestamptz is null or occurred_at >= $5)
+	and ($6::timestamptz is null or occurred_at <= $6)
+order by occurred_at desc, id
+limit $7 offset $8`, filter.IncidentID, filter.HostID, filter.Status, filter.CloudWatchState,
+		nullableTime(filter.From), nullableTime(filter.To), filter.Limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -72,11 +81,20 @@ from alerts where id=$1`, alertID)
 	return alert, err
 }
 
-func (s *Store) ListIncidents(ctx context.Context, limit int) ([]model.Incident, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 100
+func (s *Store) ListIncidents(ctx context.Context, filter model.IncidentFilter) ([]model.Incident, error) {
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = 100
 	}
-	rows, err := s.pool.Query(ctx, incidentSelect()+` order by created_at desc limit $1`, limit)
+	rows, err := s.pool.Query(ctx, incidentSelect()+`
+where ($1 = '' or id = $1)
+	and ($2 = '' or host_id = $2)
+	and ($3 = '' or state = $3)
+	and ($4::timestamptz is null or created_at >= $4)
+	and ($5::timestamptz is null or created_at <= $5)
+	and ($6 = '' or exists (select 1 from alerts where alerts.incident_id = incidents.id and alerts.id = $6))
+order by created_at desc, id
+limit $7 offset $8`, filter.IncidentID, filter.HostID, filter.State,
+		nullableTime(filter.From), nullableTime(filter.To), filter.AlertID, filter.Limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +121,36 @@ func (s *Store) GetIncident(ctx context.Context, incidentID string) (model.Incid
 func (s *Store) ListEvents(ctx context.Context, incidentID string) ([]model.IncidentEvent, error) {
 	rows, err := s.pool.Query(ctx, `select id, incident_id, alert_id, event_type, actor, message,
 metadata_json, created_at from incident_events where incident_id=$1 order by created_at asc`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []model.IncidentEvent
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func (s *Store) ListIncidentEvents(ctx context.Context, filter model.IncidentEventFilter) ([]model.IncidentEvent, error) {
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `select id, incident_id, alert_id, event_type, actor, message,
+metadata_json, created_at from incident_events
+where ($1 = '' or incident_id = $1)
+	and ($2 = '' or alert_id = $2)
+	and ($3 = '' or event_type = $3)
+	and ($4 = '' or actor = $4)
+	and ($5::timestamptz is null or created_at >= $5)
+	and ($6::timestamptz is null or created_at <= $6)
+order by created_at desc, id
+limit $7 offset $8`, filter.IncidentID, filter.AlertID, filter.EventType, filter.Actor,
+		nullableTime(filter.From), nullableTime(filter.To), filter.Limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +394,13 @@ func defaultJSON(data []byte, fallback string) []byte {
 		return []byte(fallback)
 	}
 	return data
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
 }
 
 func randomHex(n int) string {

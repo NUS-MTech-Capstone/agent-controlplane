@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/model"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/service"
@@ -33,6 +35,24 @@ func serveYAML(body []byte) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 		_, _ = w.Write(body)
 	}
+}
+
+func parseOptionalTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, value)
+}
+
+func parsePositiveInt(value string, fallback int) int {
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func statusForError(err error) int {

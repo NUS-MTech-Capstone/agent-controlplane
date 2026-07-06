@@ -197,12 +197,52 @@ type ApprovalDecisionAudit struct {
 	CreatedAt         time.Time       `json:"createdAt"`
 }
 
+type AlertFilter struct {
+	IncidentID      string
+	HostID          string
+	Status          string
+	CloudWatchState string
+	From            time.Time
+	To              time.Time
+	Limit           int
+	Offset          int
+}
+
+type IncidentFilter struct {
+	IncidentID string
+	AlertID    string
+	HostID     string
+	State      string
+	From       time.Time
+	To         time.Time
+	Limit      int
+	Offset     int
+}
+
+type IncidentEventFilter struct {
+	IncidentID string
+	AlertID    string
+	EventType  string
+	Actor      string
+	From       time.Time
+	To         time.Time
+	Limit      int
+	Offset     int
+}
+
 type AlertListResponse struct {
-	Alerts []ManagedAlert `json:"alerts"`
+	Alerts     []ManagedAlert `json:"alerts"`
+	NextCursor string         `json:"nextCursor,omitempty"`
 }
 
 type IncidentListResponse struct {
-	Incidents []IncidentSummary `json:"incidents"`
+	Incidents  []IncidentSummary `json:"incidents"`
+	NextCursor string            `json:"nextCursor,omitempty"`
+}
+
+type IncidentEventListResponse struct {
+	Events     []IncidentEvent `json:"events"`
+	NextCursor string          `json:"nextCursor,omitempty"`
 }
 
 type IncidentSummary struct {

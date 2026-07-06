@@ -40,10 +40,23 @@ GET  /agentic-ai/health
 GET  /alerts
 GET  /alerts/{alertId}
 GET  /incidents
+GET  /incidents/events
 GET  /incidents/{incidentId}
 POST /incidents/{incidentId}/approve
 POST /incidents/{incidentId}/reject
 ```
+
+Dashboard query parameters:
+
+```text
+/alerts?incidentId=&hostId=&status=&cloudwatchState=&from=&to=&limit=&cursor=
+/incidents?incidentId=&alertId=&hostId=&state=&from=&to=&limit=&cursor=
+/incidents/events?incidentId=&alertId=&eventType=&actor=&from=&to=&limit=&cursor=
+```
+
+`/incidents/events` returns metadata timeline events only. It must not return
+model prompts, secrets, tokens, private keys, raw terminal streams, or
+unrestricted command bodies.
 
 Internal automation routes require workload or capability bearer tokens:
 
