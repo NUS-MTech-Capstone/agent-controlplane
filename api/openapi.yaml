@@ -1,0 +1,148 @@
+openapi: 3.1.0
+info:
+  title: DenDenMushi Agent Control Plane API
+  version: 0.1.0
+  description: Agentic AI API and internal bounded automation control plane.
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+  /readyz:
+    get:
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+  /agentic-ai/health:
+    get:
+      summary: Agentic AI operational health
+      security:
+        - albCognito: []
+      responses:
+        "200":
+          description: Safe health metadata.
+  /alerts:
+    get:
+      summary: List managed-server alerts
+      security:
+        - albCognito: []
+      responses:
+        "200":
+          description: Alert list.
+  /alerts/{alertId}:
+    get:
+      summary: Get one managed-server alert
+      security:
+        - albCognito: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Alert detail.
+        "404":
+          description: Alert not found.
+  /incidents:
+    get:
+      summary: List incidents
+      security:
+        - albCognito: []
+      responses:
+        "200":
+          description: Incident list or HTML page.
+  /incidents/{incidentId}:
+    get:
+      summary: Get one incident
+      security:
+        - albCognito: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Incident detail or HTML page.
+        "404":
+          description: Incident not found.
+  /incidents/{incidentId}/approve:
+    post:
+      summary: Approve an exact stored remediation plan
+      security:
+        - albCognito: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated incident detail for JSON callers, or redirect for HTML callers.
+        "403":
+          description: Manager or Admin group required.
+        "409":
+          description: Plan hash drift or expiry.
+  /incidents/{incidentId}/reject:
+    post:
+      summary: Reject an exact stored remediation plan
+      security:
+        - albCognito: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated incident detail for JSON callers, or redirect for HTML callers.
+  /automation/runs/start:
+    post:
+      summary: Start a bounded automation run
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Automation run and capability token.
+  /automation/runs/{runId}/token:
+    post:
+      summary: Issue a fresh automation capability token
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Automation run and capability token.
+  /automation/runs/{runId}/close:
+    post:
+      summary: Close an automation run
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Closed.
+components:
+  securitySchemes:
+    albCognito:
+      type: apiKey
+      in: header
+      name: x-amzn-oidc-data
+    bearerAuth:
+      type: http
+      scheme: bearer
+
