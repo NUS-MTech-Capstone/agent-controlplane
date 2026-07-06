@@ -26,10 +26,21 @@ ALB_ARN=
 COGNITO_USER_POOL_ID=
 COGNITO_ISSUER=
 COGNITO_CLIENT_ID=
+EVENT_PUBLISHER_ENABLED=false
+EVENTS_TOPIC_ARN=
 ```
 
 `DATABASE_SECRET_ID` should contain the raw Postgres connection URL. The
 Kubernetes deployment uses IRSA to read that secret.
+
+When `EVENT_PUBLISHER_ENABLED=true`, Agent Control Plane publishes sanitized
+`PlanApproved`, `PlanRejected`, `RemediationExecuted`, and
+`RemediationFailed` metadata events to the configured SNS topic after the
+existing Postgres timeline write. Publish failures are logged and do not change
+approval, rejection, remediation, verification, or run cleanup behavior. Events
+include correlation fields such as `incidentId`, `runId`, `hostId`, `userId`,
+and `planHash`, but never include prompts, raw model responses, tokens, command
+bodies, terminal streams, or secrets.
 
 ## Endpoints
 

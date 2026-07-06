@@ -26,6 +26,8 @@ type Config struct {
 	CognitoIssuer         string
 	CognitoClientID       string
 	AutomationServiceName string
+	EventPublisher        bool
+	EventsTopicARN        string
 }
 
 func Load(ctx context.Context) (Config, error) {
@@ -51,6 +53,8 @@ func Load(ctx context.Context) (Config, error) {
 		CognitoIssuer:         issuer,
 		CognitoClientID:       os.Getenv("COGNITO_CLIENT_ID"),
 		AutomationServiceName: "agent-controlplane",
+		EventPublisher:        boolEnv("EVENT_PUBLISHER_ENABLED", false),
+		EventsTopicARN:        os.Getenv("EVENTS_TOPIC_ARN"),
 	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretID != "" {
 		databaseURL, err := databaseURLFromSecret(ctx, cfg.DatabaseSecretID, cfg.AWSRegion)
@@ -100,4 +104,16 @@ func intEnv(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func boolEnv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

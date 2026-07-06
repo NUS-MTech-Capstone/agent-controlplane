@@ -9,6 +9,7 @@ import (
 
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/clients"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/config"
+	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/events"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/httpapi"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/observability"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/service"
@@ -41,6 +42,11 @@ func main() {
 		slog.Error("identity verifier setup failed", "error", err)
 		os.Exit(1)
 	}
+	eventPublisher, err := events.NewPublisher(ctx, cfg.EventPublisher, cfg.AWSRegion, cfg.EventsTopicARN)
+	if err != nil {
+		slog.Error("metadata event publisher setup failed", "error", err)
+		os.Exit(1)
+	}
 	svc := service.New(
 		db,
 		clients.NewSessionManager(cfg.SessionManagerURL, httpClient),
@@ -50,6 +56,7 @@ func main() {
 		cfg.WorkloadTokenFile,
 		cfg.OperationTimeout,
 		cfg.MaxOperationBytes,
+		eventPublisher,
 	)
 	addr := ":" + cfg.Port
 	slog.Info("server_listening", "addr", addr)

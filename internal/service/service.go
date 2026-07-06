@@ -12,6 +12,7 @@ import (
 
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/catalog"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/clients"
+	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/events"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/model"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/observability"
 	"github.com/NUS-MTech-Capstone/agent-controlplane/internal/store"
@@ -73,14 +74,20 @@ type Service struct {
 	operationTimeout  time.Duration
 	maxOutputBytes    int
 	now               func() time.Time
+	events            events.Publisher
 }
 
-func New(store Store, sm SessionManager, sts STS, dataplane Dataplane, worker Worker, workloadTokenFile string, operationTimeout time.Duration, maxOutputBytes int) *Service {
+func New(store Store, sm SessionManager, sts STS, dataplane Dataplane, worker Worker, workloadTokenFile string, operationTimeout time.Duration, maxOutputBytes int, publishers ...events.Publisher) *Service {
+	publisher := events.Publisher(events.NoopPublisher{})
+	if len(publishers) > 0 && publishers[0] != nil {
+		publisher = publishers[0]
+	}
 	return &Service{
 		store: store, sm: sm, sts: sts, dataplane: dataplane, worker: worker,
 		workloadTokenFile: workloadTokenFile, operationTimeout: operationTimeout,
 		maxOutputBytes: maxOutputBytes,
 		now:            func() time.Time { return time.Now().UTC() },
+		events:         publisher,
 	}
 }
 
@@ -224,6 +231,17 @@ func (s *Service) Approve(ctx context.Context, incidentID, planHash, subject str
 	_ = s.store.CreateApprovalDecision(ctx, incidentID, "APPROVE", planHash, subject, model.ApprovalSucceeded, "")
 	_ = s.store.SetAlertStatusForIncident(ctx, incidentID, model.AlertExecuting, "")
 	_, _ = s.store.CreateEvent(ctx, incidentID, "PlanApproved", "", subject, "Manager approved exact remediation plan.", map[string]any{"planHash": planHash})
+	s.events.Emit(ctx, events.Event{
+		EventType:  "PlanApproved",
+		RequestID:  observability.RequestID(ctx),
+		UserID:     subject,
+		HostID:     incident.HostID,
+		IncidentID: incidentID,
+		RunID:      incident.RunID,
+		Action:     "approve",
+		Outcome:    "approved",
+		PlanHash:   planHash,
+	})
 	s.Execute(ctx, incidentID, planHash)
 	return s.GetIncidentDetail(ctx, incidentID)
 }
@@ -249,6 +267,17 @@ func (s *Service) Reject(ctx context.Context, incidentID, planHash, subject stri
 	_ = s.store.CreateApprovalDecision(ctx, incidentID, "REJECT", planHash, subject, model.ApprovalSucceeded, "")
 	_ = s.store.SetAlertStatusForIncident(ctx, incidentID, model.AlertRejected, "")
 	_, _ = s.store.CreateEvent(ctx, incidentID, "PlanRejected", "", subject, "Manager rejected exact remediation plan.", map[string]any{"planHash": planHash})
+	s.events.Emit(ctx, events.Event{
+		EventType:  "PlanRejected",
+		RequestID:  observability.RequestID(ctx),
+		UserID:     subject,
+		HostID:     incident.HostID,
+		IncidentID: incidentID,
+		RunID:      incident.RunID,
+		Action:     "reject",
+		Outcome:    "rejected",
+		PlanHash:   planHash,
+	})
 	if incident.RunID != "" {
 		go s.closeAfterReject(observability.ContextWithRequestID(context.Background(), observability.RequestID(ctx)), incident)
 	}
@@ -348,6 +377,17 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 	_ = s.store.SetIncidentReport(ctx, incidentID, state, report, errorMessage, structured)
 	_ = s.store.SetAlertStatusForIncident(ctx, incidentID, alertStatus, errorMessage)
 	_, _ = s.store.CreateEvent(ctx, incidentID, eventType, "", "", eventMessage, map[string]any{"planHash": incident.PlanHash})
+	s.events.Emit(ctx, events.Event{
+		EventType:  eventType,
+		RequestID:  observability.RequestID(ctx),
+		HostID:     incident.HostID,
+		IncidentID: incidentID,
+		RunID:      incident.RunID,
+		Action:     "remediate",
+		Outcome:    strings.TrimPrefix(strings.ToLower(eventType), "remediation"),
+		ReasonCode: errorMessage,
+		PlanHash:   incident.PlanHash,
+	})
 	verifyEvent := "VerificationPassed"
 	verifyMessage := "Post-remediation verification passed."
 	if !success {
@@ -376,6 +416,17 @@ func (s *Service) failExecution(ctx context.Context, incident model.Incident, st
 	_ = s.store.SetIncidentReport(ctx, incident.ID, model.IncidentFailed, "Approved remediation could not be completed.", message, report)
 	_ = s.store.SetAlertStatusForIncident(ctx, incident.ID, model.AlertFailed, message)
 	_, _ = s.store.CreateEvent(ctx, incident.ID, "RemediationFailed", "", "", "Approved remediation failed.", map[string]any{"errorKind": "execution"})
+	s.events.Emit(ctx, events.Event{
+		EventType:  "RemediationFailed",
+		RequestID:  observability.RequestID(ctx),
+		HostID:     incident.HostID,
+		IncidentID: incident.ID,
+		RunID:      incident.RunID,
+		Action:     "remediate",
+		Outcome:    "failed",
+		ReasonCode: "execution",
+		PlanHash:   incident.PlanHash,
+	})
 	slog.WarnContext(ctx, "RemediationFailed", "requestId", observability.RequestID(ctx), "incidentId", incident.ID, "runId", incident.RunID, "error", cause)
 }
 
