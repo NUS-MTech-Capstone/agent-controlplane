@@ -85,12 +85,20 @@ assignment metadata; managers approve plans, they do not create runtime
 actions.
 
 Incident detail responses include an additive `explanation` object populated by
-Incident Agent. It shows safe model metadata, catalog version, diagnostic and
-verification operation IDs, tool-selection reasons, guardrail outcomes, and
-responsibility boundaries. Agent Control Plane also records timeline metadata
-for automation token issuance, approved operation execution, verification
-operations, and automation run closeout. Tokens, command bodies, prompts, raw
-model responses, secrets, and terminal streams are never returned.
+Incident Agent. It shows safe model metadata, catalog version, named runtime
+agents, reasoning types, memory scope, tools, inputs, outputs, handoffs,
+diagnostic and verification operation IDs, tool-selection reasons, guardrail
+outcomes, and responsibility boundaries. Agent Control Plane also records
+timeline metadata for automation token issuance, approved operation execution,
+verification operations, and automation run closeout. Tokens, command bodies,
+prompts, raw model responses, secrets, and terminal streams are never returned.
+
+The named agents are reportable runtime roles inside the bounded workflow:
+Incident Manager Agent, Triage Agent, Evidence Collector Agent, Action Plan
+Agent, Action Plan Reviewer Agent, and Remediation Executor Agent. They do not
+weaken the existing security model: model output remains advisory, deterministic
+review and exact plan-hash approval remain mandatory, and live terminal traffic
+still bypasses Agent Control Plane.
 
 ## Development
 

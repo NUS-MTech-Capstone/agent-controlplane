@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,17 @@ func TestIncidentExplanationJSONShape(t *testing.T) {
 				RunID:                  "run-1",
 				PlanHash:               "hash",
 			},
+			Agents: []model.ExplanationAgent{{
+				Name:             "Action Plan Reviewer Agent",
+				Purpose:          "Validate the proposed plan before it can be stored or approved.",
+				Responsibilities: []string{"Reject unsupported operation IDs."},
+				ReasoningType:    "deterministic safety rules",
+				Memory:           "none beyond the candidate plan",
+				Tools:            []string{"operation catalog"},
+				Inputs:           []string{"candidate Plan"},
+				Outputs:          []string{"validated Plan"},
+				HandoffTo:        "Manager/Admin approval",
+			}},
 			ToolDecisions: []model.ExplanationToolDecision{{
 				OperationID: "target_probe", Phase: "diagnose", ChosenBy: "policy", Reason: "default diagnostic",
 			}},
@@ -114,8 +126,22 @@ func TestIncidentExplanationJSONShape(t *testing.T) {
 	if _, ok := explanation["toolDecisions"]; !ok {
 		t.Fatalf("missing toolDecisions in %s", string(body))
 	}
+	agents, ok := explanation["agents"].([]any)
+	if !ok || len(agents) != 1 {
+		t.Fatalf("missing agents in %s", string(body))
+	}
 	if string(body) == "" || json.Valid(body) == false {
 		t.Fatalf("invalid json %s", string(body))
+	}
+}
+
+func TestOpenAPIIncludesExplanationAgents(t *testing.T) {
+	body, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "agents:") || !strings.Contains(string(body), "reasoningType:") {
+		t.Fatalf("openapi.yaml does not document explanation agents")
 	}
 }
 

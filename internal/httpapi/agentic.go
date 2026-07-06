@@ -336,8 +336,18 @@ func renderExplanation(explanation model.IncidentExplanation) string {
 			html.EscapeString(status),
 			html.EscapeString(guardrail.Reason))
 	}
+	agents := ""
+	for _, agent := range explanation.Agents {
+		agents += fmt.Sprintf("<p><b>%s:</b> %s Reasoning: %s. Memory: %s. Tools: %s. Handoff: %s.</p>",
+			html.EscapeString(agent.Name),
+			html.EscapeString(agent.Purpose),
+			html.EscapeString(agent.ReasoningType),
+			html.EscapeString(agent.Memory),
+			html.EscapeString(strings.Join(agent.Tools, ", ")),
+			html.EscapeString(agent.HandoffTo))
+	}
 	return fmt.Sprintf(
-		"<div class='card'><h2>Explainability</h2><p><b>Planner:</b> %s (%s)</p><p><b>Model:</b> %s %s</p><p><b>Catalog:</b> %s</p><p><b>Responsibility:</b> execution owner %s, token issuer %s, terminal traffic %s</p>%s%s</div>",
+		"<div class='card'><h2>Explainability</h2><p><b>Planner:</b> %s (%s)</p><p><b>Model:</b> %s %s</p><p><b>Catalog:</b> %s</p><p><b>Responsibility:</b> execution owner %s, token issuer %s, terminal traffic %s</p>%s%s%s</div>",
 		html.EscapeString(explanation.Model.PlannerType),
 		html.EscapeString(explanation.Model.Provider),
 		html.EscapeString(explanation.Model.ModelID),
@@ -346,6 +356,7 @@ func renderExplanation(explanation model.IncidentExplanation) string {
 		html.EscapeString(explanation.Responsibility.ExecutionOwner),
 		html.EscapeString(explanation.Responsibility.TokenIssuer),
 		html.EscapeString(explanation.Responsibility.TerminalTraffic),
+		agents,
 		tools,
 		guardrails,
 	)

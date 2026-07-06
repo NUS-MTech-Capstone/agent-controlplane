@@ -264,6 +264,28 @@ components:
               items: { type: string }
             runId: { type: string }
             planHash: { type: string }
+        agents:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              purpose: { type: string }
+              responsibilities:
+                type: array
+                items: { type: string }
+              reasoningType: { type: string }
+              memory: { type: string }
+              tools:
+                type: array
+                items: { type: string }
+              inputs:
+                type: array
+                items: { type: string }
+              outputs:
+                type: array
+                items: { type: string }
+              handoffTo: { type: string }
         toolDecisions:
           type: array
           items:

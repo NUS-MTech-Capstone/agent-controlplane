@@ -111,9 +111,22 @@ type ExplanationResponsibility struct {
 	TerminalTraffic       string `json:"terminalTraffic"`
 }
 
+type ExplanationAgent struct {
+	Name             string   `json:"name"`
+	Purpose          string   `json:"purpose"`
+	Responsibilities []string `json:"responsibilities"`
+	ReasoningType    string   `json:"reasoningType"`
+	Memory           string   `json:"memory"`
+	Tools            []string `json:"tools"`
+	Inputs           []string `json:"inputs"`
+	Outputs          []string `json:"outputs"`
+	HandoffTo        string   `json:"handoffTo"`
+}
+
 type IncidentExplanation struct {
 	Model          ExplanationModel          `json:"model"`
 	Workflow       ExplanationWorkflow       `json:"workflow"`
+	Agents         []ExplanationAgent        `json:"agents"`
 	ToolDecisions  []ExplanationToolDecision `json:"toolDecisions"`
 	Guardrails     []ExplanationGuardrail    `json:"guardrails"`
 	Responsibility ExplanationResponsibility `json:"responsibility"`
