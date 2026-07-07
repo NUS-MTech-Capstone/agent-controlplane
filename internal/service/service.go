@@ -137,6 +137,9 @@ func (s *Service) ListAlerts(ctx context.Context, filter model.AlertFilter) (mod
 	if err != nil {
 		return model.AlertListResponse{}, err
 	}
+	if alerts == nil {
+		alerts = []model.ManagedAlert{}
+	}
 	response := model.AlertListResponse{Alerts: alerts}
 	if len(alerts) == filter.Limit {
 		response.NextCursor = strconv.Itoa(filter.Offset + len(alerts))
@@ -202,6 +205,9 @@ func (s *Service) ListIncidentEvents(ctx context.Context, filter model.IncidentE
 	events, err := s.store.ListIncidentEvents(ctx, filter)
 	if err != nil {
 		return model.IncidentEventListResponse{}, err
+	}
+	if events == nil {
+		events = []model.IncidentEvent{}
 	}
 	response := model.IncidentEventListResponse{Events: events}
 	if len(events) == filter.Limit {

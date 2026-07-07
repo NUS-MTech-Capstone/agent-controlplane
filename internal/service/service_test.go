@@ -195,6 +195,35 @@ func TestListQueriesApplyFiltersAndCursors(t *testing.T) {
 	}
 }
 
+func TestListResponsesUseEmptyArrays(t *testing.T) {
+	store := &executeStore{}
+	svc := New(store, nil, nil, nil, nil, "", time.Second, 4096)
+
+	alerts, err := svc.ListAlerts(t.Context(), model.AlertFilter{})
+	if err != nil {
+		t.Fatalf("ListAlerts() error = %v", err)
+	}
+	if alerts.Alerts == nil || len(alerts.Alerts) != 0 {
+		t.Fatalf("alerts should be an empty array, got %#v", alerts.Alerts)
+	}
+
+	incidents, err := svc.ListIncidents(t.Context(), model.IncidentFilter{})
+	if err != nil {
+		t.Fatalf("ListIncidents() error = %v", err)
+	}
+	if incidents.Incidents == nil || len(incidents.Incidents) != 0 {
+		t.Fatalf("incidents should be an empty array, got %#v", incidents.Incidents)
+	}
+
+	events, err := svc.ListIncidentEvents(t.Context(), model.IncidentEventFilter{})
+	if err != nil {
+		t.Fatalf("ListIncidentEvents() error = %v", err)
+	}
+	if events.Events == nil || len(events.Events) != 0 {
+		t.Fatalf("events should be an empty array, got %#v", events.Events)
+	}
+}
+
 type executeStore struct {
 	incident       model.Incident
 	alerts         []model.ManagedAlert
