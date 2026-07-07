@@ -40,6 +40,7 @@ func do(t *testing.T, server http.Handler, method, path, body, auth string, want
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
+	req.Header.Set(apiVersionHeader, supportedAPIVersion)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != want {

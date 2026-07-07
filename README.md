@@ -85,6 +85,10 @@ GET /readyz
 GET /openapi.yaml
 ```
 
+Business endpoints require `x-api-version: 1`. `GET /healthz`, `GET /readyz`,
+and `GET /openapi.yaml` are exempt so probes and spec reads do not need custom
+headers.
+
 ## Safety Model
 
 Approval and rejection require a Cognito user in `Manager` or `Admin`.

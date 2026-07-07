@@ -40,6 +40,7 @@ func ContextWithRequestID(ctx context.Context, requestID string) context.Context
 }
 
 func SetRequestHeaders(ctx context.Context, req *http.Request) {
+	req.Header.Set("x-api-version", "1")
 	if requestID := RequestID(ctx); requestID != "" {
 		req.Header.Set("X-Request-ID", requestID)
 	}

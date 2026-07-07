@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: DenDenMushi Agent Control Plane API
   version: 0.1.0
-  description: Agentic AI API and internal bounded automation control plane.
+  description: Agentic AI API and internal bounded automation control plane. Business endpoints require the `x-api-version: 1` header; probe and OpenAPI endpoints are exempt.
 paths:
   /healthz:
     get:
