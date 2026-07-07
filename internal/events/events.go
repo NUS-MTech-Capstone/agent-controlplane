@@ -71,7 +71,7 @@ func NewPublisher(ctx context.Context, enabled bool, region, topicARN string) (P
 	return &SNSPublisher{topicARN: topicARN, region: region, creds: cfg.Credentials, client: &http.Client{Timeout: 2 * time.Second}}, nil
 }
 
-func (p *SNSPublisher) Emit(_ context.Context, event Event) {
+func (p *SNSPublisher) Emit(ctx context.Context, event Event) {
 	event.SchemaVersion = SchemaVersion
 	if event.EventID == "" {
 		event.EventID = newID()
@@ -94,7 +94,7 @@ func (p *SNSPublisher) Emit(_ context.Context, event Event) {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		if err := p.publish(ctx, string(data)); err != nil {
 			emitFailure(observability.ErrorKind(err))

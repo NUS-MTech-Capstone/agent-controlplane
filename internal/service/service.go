@@ -279,7 +279,7 @@ func (s *Service) Reject(ctx context.Context, incidentID, planHash, subject stri
 		PlanHash:   planHash,
 	})
 	if incident.RunID != "" {
-		go s.closeAfterReject(observability.ContextWithRequestID(context.Background(), observability.RequestID(ctx)), incident)
+		go s.closeAfterReject(observability.ContextWithRequestID(context.WithoutCancel(ctx), observability.RequestID(ctx)), incident)
 	}
 	return s.GetIncidentDetail(ctx, incidentID)
 }

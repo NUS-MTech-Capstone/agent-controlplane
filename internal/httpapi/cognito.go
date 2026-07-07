@@ -123,11 +123,11 @@ func (v *ALBJWTVerifier) publicKey(ctx context.Context, keyID string) (*ecdsa.Pu
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, keyURL, nil) // #nosec G107 -- trusted base URL plus validated path segment.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, keyURL, nil) // #nosec G704 -- trusted base URL plus validated path segment.
 	if err != nil {
 		return nil, err
 	}
-	resp, err := v.httpClient.Do(req)
+	resp, err := v.httpClient.Do(req) // #nosec G704 -- request URL is built from trusted config and a validated keyID path segment.
 	if err != nil {
 		return nil, err
 	}
