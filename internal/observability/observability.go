@@ -62,6 +62,9 @@ func LogRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
+		if shouldSkipRequestLog(r, recorder.status) {
+			return
+		}
 		slog.InfoContext(r.Context(), "http_request",
 			"requestId", RequestID(r.Context()),
 			"method", r.Method,
@@ -70,6 +73,18 @@ func LogRequests(next http.Handler) http.Handler {
 			"durationMs", time.Since(start).Milliseconds(),
 		)
 	})
+}
+
+func shouldSkipRequestLog(r *http.Request, status int) bool {
+	if status >= http.StatusBadRequest || r.Method != http.MethodGet {
+		return false
+	}
+	switch r.URL.Path {
+	case "/healthz", "/readyz":
+		return true
+	default:
+		return false
+	}
 }
 
 type statusRecorder struct {
