@@ -126,6 +126,25 @@ func TestCognitoMiddlewareRejectsVerifierErrorAndIdentityMismatch(t *testing.T) 
 	}
 }
 
+func TestHealthEndpointsReportReadyAndUnavailable(t *testing.T) {
+	store := &handlerStore{}
+	server := New(service.New(store, nil, nil, nil, nil, "", time.Second, 1024), fakeVerifier{})
+	rec := serveAgentic(t, server, http.MethodGet, "/readyz", "", "application/json")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ready"`) {
+		t.Fatalf("ready response status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = serveAgentic(t, server, http.MethodGet, "/agentic-ai/health", "", "application/json")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"databaseReady":true`) {
+		t.Fatalf("health response status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	store.pingErr = errors.New("database unavailable")
+	rec = serveAgentic(t, server, http.MethodGet, "/readyz", "", "application/json")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unavailable response status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func serveAgentic(t *testing.T, server http.Handler, method, path, body, accept string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -178,9 +197,10 @@ type handlerStore struct {
 	events      []model.IncidentEvent
 	alertFilter model.AlertFilter
 	eventFilter model.IncidentEventFilter
+	pingErr     error
 }
 
-func (s *handlerStore) Ping(context.Context) error { return nil }
+func (s *handlerStore) Ping(context.Context) error { return s.pingErr }
 func (s *handlerStore) ListAlerts(_ context.Context, filter model.AlertFilter) ([]model.ManagedAlert, error) {
 	s.alertFilter = filter
 	return s.alerts, nil
