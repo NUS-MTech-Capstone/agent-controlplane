@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.5
 
 FROM golang:${GO_VERSION}-alpine AS build
 WORKDIR /src
@@ -14,4 +14,3 @@ COPY --from=build /out/server /app/server
 USER app
 EXPOSE 8092
 ENTRYPOINT ["/app/server"]
-
