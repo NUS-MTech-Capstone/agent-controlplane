@@ -91,6 +91,11 @@ headers.
 Successful probe request logs are suppressed; failed probe responses still emit
 request logs.
 
+All HTTP responses use `Cache-Control: no-store`, disable MIME sniffing and
+framing, and apply `Referrer-Policy: no-referrer`. The service does not emit
+CORS allow headers: browser access is intentionally same-origin through the
+public ALB.
+
 ## Safety Model
 
 Approval and rejection require a Cognito user in `Manager` or `Admin`.
