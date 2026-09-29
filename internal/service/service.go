@@ -514,7 +514,8 @@ func (s *Service) closeAfterReject(ctx context.Context, incident model.Incident)
 
 func canDecide(groups []string) bool {
 	for _, group := range groups {
-		if group == "Manager" || group == "Admin" {
+		group = strings.TrimSpace(group)
+		if strings.EqualFold(group, "Manager") || strings.EqualFold(group, "Admin") {
 			return true
 		}
 	}

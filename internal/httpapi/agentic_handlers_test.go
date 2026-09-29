@@ -106,6 +106,15 @@ func TestCognitoGroupsFromClaimsAndAccessToken(t *testing.T) {
 	}
 }
 
+func TestCanDecideUICanonicalizesApprovedGroupCase(t *testing.T) {
+	if !canDecideUI([]string{"admin"}) || !canDecideUI([]string{" MANAGER "}) {
+		t.Fatal("expected canonical Admin and Manager groups to be accepted case-insensitively")
+	}
+	if canDecideUI([]string{"Administrator"}) || canDecideUI([]string{"Operator"}) {
+		t.Fatal("unexpected decision access for an unapproved group")
+	}
+}
+
 func TestCognitoMiddlewareRejectsVerifierErrorAndIdentityMismatch(t *testing.T) {
 	handler := cognitoMiddleware(fakeVerifierWithError{err: errors.New("bad token")}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("next handler should not run")

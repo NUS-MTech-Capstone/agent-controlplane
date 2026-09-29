@@ -230,6 +230,19 @@ func TestApproveRequiresManagerGroupAndRecordsDeniedDecision(t *testing.T) {
 	}
 }
 
+func TestCanDecideAcceptsCanonicalCognitoGroupCaseOnly(t *testing.T) {
+	for _, groups := range [][]string{{"admin"}, {" MANAGER "}, {"Auditor", "AdMiN"}} {
+		if !canDecide(groups) {
+			t.Fatalf("canDecide(%#v) = false, want true", groups)
+		}
+	}
+	for _, groups := range [][]string{nil, {"Administrator"}, {"Managers"}, {"Operator"}} {
+		if canDecide(groups) {
+			t.Fatalf("canDecide(%#v) = true, want false", groups)
+		}
+	}
+}
+
 func TestApproveRejectsExpiredPlanBeforeMutation(t *testing.T) {
 	expired := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
 	store := &executeStore{incident: model.Incident{
