@@ -6,7 +6,8 @@ automation run control bridge.
 It does not proxy terminal streams. Live SSH traffic remains direct between the
 browser, Proxy Dataplane, and target host. The service reads and writes the
 existing incident-agent Postgres tables, while incident-agent continues to own
-SQS ingestion, Bedrock triage, evidence gathering, and schema migrations.
+SQS ingestion, durable workflow coordination, and schema migrations. A private
+Reasoning Agent owns model-backed triage and planning.
 
 ## Configuration
 
@@ -18,6 +19,7 @@ AWS_REGION=ap-southeast-1
 STS_URL=http://sts:8082
 SESSION_MANAGER_URL=http://session-manager:8081
 INCIDENT_AGENT_URL=http://incident-agent:8091
+TOOL_GATEWAY_URL=http://agent-tool-gateway:8094/mcp
 WORKLOAD_TOKEN_FILE=/var/run/secrets/tokens/agent-controlplane-token
 HTTP_TIMEOUT_SECONDS=10
 OPERATION_TIMEOUT_SECONDS=45
@@ -69,13 +71,20 @@ Dashboard query parameters:
 model prompts, secrets, tokens, private keys, raw terminal streams, or
 unrestricted command bodies.
 
-Internal automation routes require workload or capability bearer tokens:
+Internal automation routes require projected workload bearer tokens:
 
 ```http
 POST /automation/runs/start
 POST /automation/runs/{runId}/token
 POST /automation/runs/{runId}/close
 ```
+
+Only the coordinator identity may start or close a run. The token route is
+called by the Tool Gateway, and STS accepts automation capability issuance only
+from the gateway identity. Diagnostics require a live `DIAGNOSING` incident;
+remediation requires `EXECUTING`, the exact stored approved plan hash, and the
+sole approved catalog action; verification requires the same run and plan plus
+a fixed verification operation.
 
 Operational routes:
 
@@ -100,9 +109,10 @@ public ALB.
 
 Approval and rejection require a Cognito user in `Manager` or `Admin`.
 Approval checks the exact stored `planHash`, records an approval decision, and
-executes only the single approved operation from the code-reviewed v1
-remediation catalog, followed by bounded verification operations. Automation
-authority still comes from STS capability tokens and Session Manager run
+requests only the single approved operation from the code-reviewed v1
+remediation catalog through the MCP Tool Gateway, followed by bounded
+verification operations. It no longer calls Proxy Dataplane directly.
+Automation authority still comes from STS capability tokens and Session Manager run
 assignment metadata; managers approve plans, they do not create runtime
 actions.
 
@@ -115,12 +125,11 @@ timeline metadata for automation token issuance, approved operation execution,
 verification operations, and automation run closeout. Tokens, command bodies,
 prompts, raw model responses, secrets, and terminal streams are never returned.
 
-The named agents are reportable runtime roles inside the bounded workflow:
-Incident Manager Agent, Triage Agent, Evidence Collector Agent, Action Plan
-Agent, Action Plan Reviewer Agent, and Remediation Executor Agent. They do not
-weaken the existing security model: model output remains advisory, deterministic
-review and exact plan-hash approval remain mandatory, and live terminal traffic
-still bypasses Agent Control Plane.
+The physical A2A boundary separates durable coordination from stateless model
+reasoning, while the named workflow roles remain useful explainability labels.
+Neither A2A nor MCP weakens the existing security model: model output remains
+advisory, deterministic review and exact plan-hash approval remain mandatory,
+and live terminal traffic still bypasses Agent Control Plane.
 
 ## Development
 

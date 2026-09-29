@@ -51,7 +51,7 @@ func main() {
 		db,
 		clients.NewSessionManager(cfg.SessionManagerURL, httpClient),
 		clients.NewSTS(cfg.STSURL, httpClient),
-		clients.NewDataplane(httpClient),
+		clients.NewToolGateway(cfg.ToolGatewayURL, cfg.WorkloadTokenFile, httpClient),
 		clients.NewWorker(cfg.IncidentAgentURL, httpClient),
 		cfg.WorkloadTokenFile,
 		cfg.OperationTimeout,

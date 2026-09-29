@@ -28,6 +28,12 @@ type AutomationTokenRequest struct {
 	OwnerInstanceID   string   `json:"ownerInstanceId"`
 }
 
+type WorkloadIdentity struct {
+	Subject        string `json:"subject"`
+	Namespace      string `json:"namespace"`
+	ServiceAccount string `json:"serviceAccount"`
+}
+
 func NewSTS(baseURL string, client *http.Client) *STS {
 	return &STS{baseURL: strings.TrimRight(baseURL, "/"), client: client}
 }
@@ -68,6 +74,25 @@ func (c *STS) ValidateAutomationToken(ctx context.Context, runID, token string) 
 		return fmt.Errorf("automation token rejected: %s", resp.Reason)
 	}
 	return nil
+}
+
+func (c *STS) ValidateWorkload(ctx context.Context, workloadToken string) (WorkloadIdentity, error) {
+	var identity WorkloadIdentity
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/workloads/validate", nil)
+	if err != nil {
+		return identity, err
+	}
+	req.Header.Set("Authorization", "Bearer "+workloadToken)
+	observability.SetRequestHeaders(ctx, req)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return identity, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return identity, fmt.Errorf("sts returned status %d", resp.StatusCode)
+	}
+	return identity, json.NewDecoder(resp.Body).Decode(&identity)
 }
 
 func (c *STS) post(ctx context.Context, path string, req any, resp any) error {

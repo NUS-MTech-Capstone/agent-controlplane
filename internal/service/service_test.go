@@ -23,8 +23,7 @@ func TestExecuteUsesApprovedCatalogOperation(t *testing.T) {
 		},
 	}
 	store := &executeStore{incident: incident}
-	sts := &executeSTS{}
-	dataplane := &executeDataplane{}
+	gateway := &executeGateway{}
 	workloadToken := t.TempDir() + "/token"
 	if err := os.WriteFile(workloadToken, []byte("workload"), 0o600); err != nil {
 		t.Fatal(err)
@@ -32,8 +31,8 @@ func TestExecuteUsesApprovedCatalogOperation(t *testing.T) {
 	svc := New(
 		store,
 		executeSM{},
-		sts,
-		dataplane,
+		&executeSTS{},
+		gateway,
 		nil,
 		workloadToken,
 		time.Second,
@@ -42,20 +41,13 @@ func TestExecuteUsesApprovedCatalogOperation(t *testing.T) {
 
 	svc.Execute(t.Context(), incident.ID, incident.PlanHash)
 
-	if len(sts.requests) == 0 {
-		t.Fatal("no STS token requests recorded")
-	}
-	remediate := sts.requests[0]
-	if remediate.Phase != "remediate" || len(remediate.AllowedOperations) != 1 || remediate.AllowedOperations[0] != "recover_demo_app" {
-		t.Fatalf("remediation token request = %#v", remediate)
-	}
-	if len(dataplane.operations) == 0 || dataplane.operations[0] != "recover_demo_app" {
-		t.Fatalf("dataplane operations = %#v", dataplane.operations)
+	if len(gateway.operations) != 3 || gateway.operations[0] != "recover_demo_app" {
+		t.Fatalf("gateway operations = %#v", gateway.operations)
 	}
 	if store.report.ActionTaken != "recover_demo_app exit=0" {
 		t.Fatalf("action taken = %q", store.report.ActionTaken)
 	}
-	if !store.hasEvent("AutomationTokenIssued") || !store.hasEvent("OperationExecuted") ||
+	if !store.hasEvent("OperationExecuted") ||
 		!store.hasEvent("VerificationOperationExecuted") || !store.hasEvent("AutomationRunClosed") {
 		t.Fatalf("events = %#v", store.events)
 	}
@@ -320,7 +312,7 @@ func TestAutomationRunLifecycleErrors(t *testing.T) {
 		IncidentID: "inc-1", HostID: "host-1", Phase: "diagnose",
 		AllowedOperations: []string{"health_check"}, WorkloadToken: "workload",
 	})
-	if !errors.Is(err, sts.err) || sm.closedRunID != "run-1" {
+	if !errors.Is(err, ErrForbidden) || sm.closedRunID != "" {
 		t.Fatalf("err=%v closedRunID=%q", err, sm.closedRunID)
 	}
 
@@ -331,6 +323,77 @@ func TestAutomationRunLifecycleErrors(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "not active") {
 		t.Fatalf("IssueAutomationToken() error = %v, want inactive run", err)
+	}
+}
+
+func TestAutomationTokenIssuanceEnforcesIncidentStateAndPlan(t *testing.T) {
+	baseIncident := model.Incident{
+		ID: "inc-1", HostID: "host-1", State: model.IncidentExecuting,
+		RunID: "run-1", PlanHash: strings.Repeat("a", 64),
+		Plan: model.Plan{Actions: []model.Action{{OperationID: "restart_service", Reason: "health check failed"}}},
+	}
+	newService := func(incident model.Incident) (*Service, *executeSTS) {
+		sts := &executeSTS{}
+		sm := &automationSM{run: model.AutomationRun{
+			RunID: "run-1", IncidentID: "inc-1", HostID: "host-1",
+			OwnerPodID: "pod-1", OwnerInstanceID: "instance-1", Status: "ACTIVE",
+		}}
+		return New(&executeStore{incident: incident}, sm, sts, nil, nil, "", time.Second, 4096), sts
+	}
+
+	t.Run("approved remediation", func(t *testing.T) {
+		svc, sts := newService(baseIncident)
+		_, err := svc.IssueAutomationToken(t.Context(), "run-1", model.AutomationTokenRequest{
+			Phase: "remediate", AllowedOperations: []string{"restart_service"},
+			PlanHash: baseIncident.PlanHash, WorkloadToken: "gateway-token",
+		})
+		if err != nil || len(sts.requests) != 1 {
+			t.Fatalf("IssueAutomationToken() err=%v requests=%#v", err, sts.requests)
+		}
+	})
+
+	for _, tt := range []struct {
+		name      string
+		incident  model.Incident
+		phase     string
+		operation string
+		planHash  string
+	}{
+		{name: "stale plan hash", incident: baseIncident, phase: "remediate", operation: "restart_service", planHash: strings.Repeat("b", 64)},
+		{name: "unapproved remediation", incident: baseIncident, phase: "remediate", operation: "recover_demo_app", planHash: baseIncident.PlanHash},
+		{name: "diagnostic during execution", incident: baseIncident, phase: "diagnose", operation: "health_check"},
+		{name: "non verification operation", incident: baseIncident, phase: "verify", operation: "restart_service", planHash: baseIncident.PlanHash},
+		{name: "cross run", incident: func() model.Incident { value := baseIncident; value.RunID = "run-other"; return value }(), phase: "verify", operation: "health_check", planHash: baseIncident.PlanHash},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, sts := newService(tt.incident)
+			_, err := svc.IssueAutomationToken(t.Context(), "run-1", model.AutomationTokenRequest{
+				Phase: tt.phase, AllowedOperations: []string{tt.operation},
+				PlanHash: tt.planHash, WorkloadToken: "gateway-token",
+			})
+			if err == nil || len(sts.requests) != 0 {
+				t.Fatalf("IssueAutomationToken() err=%v requests=%#v", err, sts.requests)
+			}
+		})
+	}
+}
+
+func TestAutomationRunRequiresCoordinatorIdentity(t *testing.T) {
+	store := &executeStore{incident: model.Incident{
+		ID: "inc-1", HostID: "host-1", State: model.IncidentDiagnosing,
+	}}
+	sts := &executeSTS{identity: clients.WorkloadIdentity{
+		Subject:        "system:serviceaccount:dendenmushi-agentic:agent-controlplane",
+		Namespace:      "dendenmushi-agentic",
+		ServiceAccount: "agent-controlplane",
+	}}
+	svc := New(store, &automationSM{}, sts, nil, nil, "", time.Second, 4096)
+	_, err := svc.StartAutomationRun(t.Context(), model.AutomationRunRequest{
+		IncidentID: "inc-1", HostID: "host-1", Phase: "diagnose",
+		AllowedOperations: []string{"health_check"}, WorkloadToken: "controlplane-token",
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("StartAutomationRun() error = %v, want ErrForbidden", err)
 	}
 }
 
@@ -449,6 +512,7 @@ func (executeSM) CloseAutomationRun(context.Context, string) error { return nil 
 type executeSTS struct {
 	requests []clients.AutomationTokenRequest
 	err      error
+	identity clients.WorkloadIdentity
 }
 
 func (s *executeSTS) RequestAutomationToken(_ context.Context, _ string, req clients.AutomationTokenRequest) (model.AutomationTokenResponse, error) {
@@ -458,13 +522,25 @@ func (s *executeSTS) RequestAutomationToken(_ context.Context, _ string, req cli
 	s.requests = append(s.requests, req)
 	return model.AutomationTokenResponse{CapabilityToken: req.Phase + "-token", ExpiresAt: time.Now().Add(time.Minute)}, nil
 }
-func (s *executeSTS) ValidateAutomationToken(context.Context, string, string) error { return nil }
+func (s *executeSTS) ValidateWorkload(context.Context, string) (clients.WorkloadIdentity, error) {
+	if s.err != nil {
+		return clients.WorkloadIdentity{}, s.err
+	}
+	if s.identity.Subject != "" {
+		return s.identity, nil
+	}
+	return clients.WorkloadIdentity{
+		Subject:        "system:serviceaccount:dendenmushi-agentic:incident-agent",
+		Namespace:      "dendenmushi-agentic",
+		ServiceAccount: "incident-agent",
+	}, nil
+}
 
-type executeDataplane struct {
+type executeGateway struct {
 	operations []string
 }
 
-func (d *executeDataplane) Execute(_ context.Context, _ string, _ string, _ string, operationID, _ string) (model.OperationResult, error) {
+func (d *executeGateway) Execute(_ context.Context, _ string, operationID, _ string) (model.OperationResult, error) {
 	d.operations = append(d.operations, operationID)
 	return model.OperationResult{OperationID: operationID, Stdout: "ok", ExitCode: 0}, nil
 }

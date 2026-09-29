@@ -14,12 +14,15 @@ import (
 )
 
 func TestAutomationHTTPValidationAndLifecycle(t *testing.T) {
-	svc := service.New(nil, fakeSM{}, fakeSTS{}, nil, nil, "", time.Second, 1024)
+	store := &handlerStore{incident: model.Incident{
+		ID: "inc-1", HostID: "host-1", State: model.IncidentDiagnosing,
+	}}
+	svc := service.New(store, fakeSM{}, fakeSTS{}, nil, nil, "", time.Second, 1024)
 	server := New(svc, fakeVerifier{})
 
 	do(t, server, http.MethodPost, "/automation/runs/start", `{}`, "", http.StatusBadRequest)
 	do(t, server, http.MethodPost, "/automation/runs/start", `{"incidentId":"inc-1","hostId":"host-1","phase":"diagnose","allowedOperations":["health_check"]}`, "Bearer workload", http.StatusCreated)
-	do(t, server, http.MethodPost, "/automation/runs/run-1/token", `{"phase":"verify","allowedOperations":["health_check"]}`, "Bearer workload", http.StatusCreated)
+	do(t, server, http.MethodPost, "/automation/runs/run-1/token", `{"phase":"diagnose","allowedOperations":["health_check"]}`, "Bearer workload", http.StatusCreated)
 	do(t, server, http.MethodPost, "/automation/runs/run-1/close", `{}`, "", http.StatusUnauthorized)
 	do(t, server, http.MethodPost, "/automation/runs/run-1/close", `{}`, "Bearer capability", http.StatusNoContent)
 }
@@ -63,7 +66,13 @@ type fakeSTS struct{}
 func (fakeSTS) RequestAutomationToken(context.Context, string, clients.AutomationTokenRequest) (model.AutomationTokenResponse, error) {
 	return model.AutomationTokenResponse{CapabilityToken: "capability", ExpiresAt: time.Now().Add(time.Minute)}, nil
 }
-func (fakeSTS) ValidateAutomationToken(context.Context, string, string) error { return nil }
+func (fakeSTS) ValidateWorkload(context.Context, string) (clients.WorkloadIdentity, error) {
+	return clients.WorkloadIdentity{
+		Subject:        "system:serviceaccount:dendenmushi-agentic:incident-agent",
+		Namespace:      "dendenmushi-agentic",
+		ServiceAccount: "incident-agent",
+	}, nil
+}
 
 func fakeRun() model.AutomationRun {
 	return model.AutomationRun{

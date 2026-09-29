@@ -18,6 +18,7 @@ type Config struct {
 	STSURL                string
 	SessionManagerURL     string
 	IncidentAgentURL      string
+	ToolGatewayURL        string
 	WorkloadTokenFile     string
 	HTTPTimeout           time.Duration
 	OperationTimeout      time.Duration
@@ -45,6 +46,7 @@ func Load(ctx context.Context) (Config, error) {
 		STSURL:                env("STS_URL", "http://localhost:8082"),
 		SessionManagerURL:     env("SESSION_MANAGER_URL", "http://localhost:8081"),
 		IncidentAgentURL:      env("INCIDENT_AGENT_URL", "http://localhost:8091"),
+		ToolGatewayURL:        env("TOOL_GATEWAY_URL", "http://localhost:8094/mcp"),
 		WorkloadTokenFile:     env("WORKLOAD_TOKEN_FILE", "/var/run/secrets/tokens/agent-controlplane-token"),
 		HTTPTimeout:           secondsEnv("HTTP_TIMEOUT_SECONDS", 10),
 		OperationTimeout:      secondsEnv("OPERATION_TIMEOUT_SECONDS", 45),

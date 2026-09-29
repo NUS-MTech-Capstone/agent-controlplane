@@ -199,10 +199,10 @@ paths:
         - bearerAuth: []
       responses:
         "201":
-          description: Automation run and capability token.
+          description: Active automation run metadata; no capability token is returned.
   /automation/runs/{runId}/token:
     post:
-      summary: Issue a fresh automation capability token
+      summary: Issue a state-checked capability to the authenticated Tool Gateway
       security:
         - bearerAuth: []
       parameters:
@@ -215,7 +215,7 @@ paths:
           description: Automation run and capability token.
   /automation/runs/{runId}/close:
     post:
-      summary: Close an automation run
+      summary: Close an automation run for the authenticated coordinator
       security:
         - bearerAuth: []
       parameters:

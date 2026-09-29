@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -53,11 +52,11 @@ type SessionManager interface {
 
 type STS interface {
 	RequestAutomationToken(context.Context, string, clients.AutomationTokenRequest) (model.AutomationTokenResponse, error)
-	ValidateAutomationToken(context.Context, string, string) error
+	ValidateWorkload(context.Context, string) (clients.WorkloadIdentity, error)
 }
 
-type Dataplane interface {
-	Execute(context.Context, string, string, string, string, string) (model.OperationResult, error)
+type ToolGateway interface {
+	Execute(context.Context, string, string, string) (model.OperationResult, error)
 }
 
 type Worker interface {
@@ -65,29 +64,27 @@ type Worker interface {
 }
 
 type Service struct {
-	store             Store
-	sm                SessionManager
-	sts               STS
-	dataplane         Dataplane
-	worker            Worker
-	workloadTokenFile string
-	operationTimeout  time.Duration
-	maxOutputBytes    int
-	now               func() time.Time
-	events            events.Publisher
+	store            Store
+	sm               SessionManager
+	sts              STS
+	tools            ToolGateway
+	worker           Worker
+	operationTimeout time.Duration
+	maxOutputBytes   int
+	now              func() time.Time
+	events           events.Publisher
 }
 
-func New(store Store, sm SessionManager, sts STS, dataplane Dataplane, worker Worker, workloadTokenFile string, operationTimeout time.Duration, maxOutputBytes int, publishers ...events.Publisher) *Service {
+func New(store Store, sm SessionManager, sts STS, tools ToolGateway, worker Worker, _ string, operationTimeout time.Duration, maxOutputBytes int, publishers ...events.Publisher) *Service {
 	publisher := events.Publisher(events.NoopPublisher{})
 	if len(publishers) > 0 && publishers[0] != nil {
 		publisher = publishers[0]
 	}
 	return &Service{
-		store: store, sm: sm, sts: sts, dataplane: dataplane, worker: worker,
-		workloadTokenFile: workloadTokenFile, operationTimeout: operationTimeout,
-		maxOutputBytes: maxOutputBytes,
-		now:            func() time.Time { return time.Now().UTC() },
-		events:         publisher,
+		store: store, sm: sm, sts: sts, tools: tools, worker: worker,
+		operationTimeout: operationTimeout, maxOutputBytes: maxOutputBytes,
+		now:    func() time.Time { return time.Now().UTC() },
+		events: publisher,
 	}
 }
 
@@ -311,18 +308,8 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		return
 	}
 	_, _ = s.store.CreateEvent(ctx, incidentID, "RemediationStarted", "", "", "Approved remediation execution started.", map[string]any{"planHash": approvedPlanHash})
-	token, err := s.issueRunToken(ctx, incident.RunID, "remediate", []string{operation}, incident.PlanHash)
-	if err != nil {
-		s.failExecution(ctx, incident, started, err)
-		return
-	}
-	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationTokenIssued", "", "", "Remediation capability token issued.", map[string]any{
-		"phase":             "remediate",
-		"allowedOperations": []string{operation},
-		"planHash":          incident.PlanHash,
-	})
 	operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
-	remediation, err := s.dataplane.Execute(operationCtx, incident.OperationsURL, incident.RunID, token.CapabilityToken, operation, incident.PlanHash)
+	remediation, err := s.tools.Execute(operationCtx, incident.RunID, operation, incident.PlanHash)
 	cancel()
 	if err != nil {
 		s.failExecution(ctx, incident, started, err)
@@ -339,20 +326,11 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		"exitCode":  remediation.ExitCode,
 		"planHash":  incident.PlanHash,
 	})
-	verifyToken, err := s.issueRunToken(ctx, incident.RunID, "verify", catalog.VerifyOperations, "")
-	if err != nil {
-		s.failExecution(ctx, incident, started, err)
-		return
-	}
-	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationTokenIssued", "", "", "Verification capability token issued.", map[string]any{
-		"phase":             "verify",
-		"allowedOperations": catalog.VerifyOperations,
-	})
 	verification := make([]model.OperationResult, 0, len(catalog.VerifyOperations))
 	success := true
 	for _, operation := range catalog.VerifyOperations {
 		operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
-		result, err := s.dataplane.Execute(operationCtx, incident.OperationsURL, incident.RunID, verifyToken.CapabilityToken, operation, "")
+		result, err := s.tools.Execute(operationCtx, incident.RunID, operation, incident.PlanHash)
 		cancel()
 		if err != nil {
 			result = model.OperationResult{OperationID: operation, Stderr: truncate(err.Error(), s.maxOutputBytes), ExitCode: -1}
@@ -401,7 +379,7 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		verifyMessage = "Post-remediation verification failed."
 	}
 	_, _ = s.store.CreateEvent(ctx, incidentID, verifyEvent, "", "", verifyMessage, map[string]any{"operationCount": len(verification)})
-	_ = s.CloseAutomationRun(ctx, incident.RunID, verifyToken.CapabilityToken)
+	_ = s.sm.CloseAutomationRun(ctx, incident.RunID)
 	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationRunClosed", "", "", "Automation run closed after remediation workflow.", map[string]any{"runId": incident.RunID})
 	slog.InfoContext(ctx, eventType, "requestId", observability.RequestID(ctx), "incidentId", incidentID, "runId", incident.RunID, "hostId", incident.HostID, "planHash", incident.PlanHash)
 }
@@ -440,16 +418,30 @@ func (s *Service) StartAutomationRun(ctx context.Context, req model.AutomationRu
 	if req.Phase != "diagnose" {
 		return model.AutomationRunResponse{}, fmt.Errorf("%w: new automation runs must start in diagnose phase", ErrBadRequest)
 	}
+	identity, err := s.sts.ValidateWorkload(ctx, req.WorkloadToken)
+	if err != nil || identity.Namespace != "dendenmushi-agentic" || identity.ServiceAccount != "incident-agent" {
+		return model.AutomationRunResponse{}, ErrForbidden
+	}
+	incident, err := s.store.GetIncident(ctx, req.IncidentID)
+	if err != nil {
+		return model.AutomationRunResponse{}, err
+	}
+	if incident.State != model.IncidentDiagnosing || incident.HostID != req.HostID {
+		return model.AutomationRunResponse{}, fmt.Errorf("%w: incident is not eligible for diagnosis", ErrConflict)
+	}
+	if len(req.AllowedOperations) == 0 {
+		return model.AutomationRunResponse{}, fmt.Errorf("%w: diagnostic operations are required", ErrBadRequest)
+	}
+	for _, operation := range req.AllowedOperations {
+		if !catalog.IsDiagnostic(operation) {
+			return model.AutomationRunResponse{}, fmt.Errorf("%w: operation is not diagnostic", ErrBadRequest)
+		}
+	}
 	run, err := s.sm.CreateAutomationRun(ctx, req.IncidentID, req.HostID)
 	if err != nil {
 		return model.AutomationRunResponse{}, err
 	}
-	token, err := s.issueAutomationToken(ctx, run, req.WorkloadToken, req.Phase, req.AllowedOperations, req.PlanHash)
-	if err != nil {
-		_ = s.sm.CloseAutomationRun(ctx, run.RunID)
-		return model.AutomationRunResponse{}, err
-	}
-	return model.AutomationRunResponse{AutomationRun: run, CapabilityToken: token.CapabilityToken, TokenExpiresAt: token.ExpiresAt}, nil
+	return model.AutomationRunResponse{AutomationRun: run}, nil
 }
 
 func (s *Service) IssueAutomationToken(ctx context.Context, runID string, req model.AutomationTokenRequest) (model.AutomationRunResponse, error) {
@@ -460,6 +452,33 @@ func (s *Service) IssueAutomationToken(ctx context.Context, runID string, req mo
 	if run.Status != "ACTIVE" {
 		return model.AutomationRunResponse{}, errors.New("automation run is not active")
 	}
+	incident, err := s.store.GetIncident(ctx, run.IncidentID)
+	if err != nil {
+		return model.AutomationRunResponse{}, err
+	}
+	if run.HostID != incident.HostID || len(req.AllowedOperations) != 1 {
+		return model.AutomationRunResponse{}, fmt.Errorf("%w: run or operation mismatch", ErrConflict)
+	}
+	operation := req.AllowedOperations[0]
+	switch req.Phase {
+	case "diagnose":
+		if incident.State != model.IncidentDiagnosing || !catalog.IsDiagnostic(operation) || req.PlanHash != "" {
+			return model.AutomationRunResponse{}, fmt.Errorf("%w: diagnostic token request is not allowed", ErrConflict)
+		}
+	case "remediate":
+		if incident.State != model.IncidentExecuting || incident.RunID != runID || incident.PlanHash == "" ||
+			req.PlanHash != incident.PlanHash || len(incident.Plan.Actions) != 1 ||
+			incident.Plan.Actions[0].OperationID != operation || !catalog.IsRemediation(operation) {
+			return model.AutomationRunResponse{}, fmt.Errorf("%w: remediation token request is not approved", ErrConflict)
+		}
+	case "verify":
+		if incident.State != model.IncidentExecuting || incident.RunID != runID || incident.PlanHash == "" ||
+			req.PlanHash != incident.PlanHash || !catalog.IsVerification(operation) {
+			return model.AutomationRunResponse{}, fmt.Errorf("%w: verification token request is not allowed", ErrConflict)
+		}
+	default:
+		return model.AutomationRunResponse{}, fmt.Errorf("%w: unsupported automation phase", ErrBadRequest)
+	}
 	token, err := s.issueAutomationToken(ctx, run, req.WorkloadToken, req.Phase, req.AllowedOperations, req.PlanHash)
 	if err != nil {
 		return model.AutomationRunResponse{}, err
@@ -468,31 +487,19 @@ func (s *Service) IssueAutomationToken(ctx context.Context, runID string, req mo
 }
 
 func (s *Service) CloseAutomationRun(ctx context.Context, runID, capabilityToken string) error {
-	if err := s.sts.ValidateAutomationToken(ctx, runID, capabilityToken); err != nil {
+	identity, err := s.sts.ValidateWorkload(ctx, capabilityToken)
+	if err != nil {
 		return err
+	}
+	if identity.Namespace != "dendenmushi-agentic" || identity.ServiceAccount != "incident-agent" {
+		return ErrForbidden
 	}
 	return s.sm.CloseAutomationRun(ctx, runID)
 }
 
-func (s *Service) issueRunToken(ctx context.Context, runID, phase string, operations []string, planHash string) (model.AutomationTokenResponse, error) {
-	run, err := s.sm.GetAutomationRun(ctx, runID)
-	if err != nil {
-		return model.AutomationTokenResponse{}, err
-	}
-	workloadToken, err := s.workloadToken()
-	if err != nil {
-		return model.AutomationTokenResponse{}, err
-	}
-	return s.issueAutomationToken(ctx, run, workloadToken, phase, operations, planHash)
-}
-
 func (s *Service) issueAutomationToken(ctx context.Context, run model.AutomationRun, workloadToken, phase string, operations []string, planHash string) (model.AutomationTokenResponse, error) {
 	if workloadToken == "" {
-		var err error
-		workloadToken, err = s.workloadToken()
-		if err != nil {
-			return model.AutomationTokenResponse{}, err
-		}
+		return model.AutomationTokenResponse{}, errors.New("projected workload token is required")
 	}
 	return s.sts.RequestAutomationToken(ctx, workloadToken, clients.AutomationTokenRequest{
 		RunID: run.RunID, IncidentID: run.IncidentID, HostID: run.HostID,
@@ -501,24 +508,8 @@ func (s *Service) issueAutomationToken(ctx context.Context, run model.Automation
 	})
 }
 
-func (s *Service) workloadToken() (string, error) {
-	body, err := os.ReadFile(s.workloadTokenFile) // #nosec G304 -- path is deployment config for projected service-account token.
-	if err != nil {
-		return "", err
-	}
-	token := strings.TrimSpace(string(body))
-	if token == "" {
-		return "", errors.New("projected workload token is empty")
-	}
-	return token, nil
-}
-
 func (s *Service) closeAfterReject(ctx context.Context, incident model.Incident) {
-	token, err := s.issueRunToken(ctx, incident.RunID, "verify", []string{"health_check"}, "")
-	if err != nil {
-		return
-	}
-	_ = s.CloseAutomationRun(ctx, incident.RunID, token.CapabilityToken)
+	_ = s.sm.CloseAutomationRun(ctx, incident.RunID)
 }
 
 func canDecide(groups []string) bool {

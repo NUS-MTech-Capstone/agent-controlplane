@@ -25,7 +25,19 @@ var VerifyOperations = []string{
 }
 
 func IsRemediation(operation string) bool {
-	for _, candidate := range RemediationOperations {
+	return contains(RemediationOperations, operation)
+}
+
+func IsDiagnostic(operation string) bool {
+	return contains(DiagnosticOperations, operation)
+}
+
+func IsVerification(operation string) bool {
+	return contains(VerifyOperations, operation)
+}
+
+func contains(operations []string, operation string) bool {
+	for _, candidate := range operations {
 		if operation == candidate {
 			return true
 		}
