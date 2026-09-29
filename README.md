@@ -107,7 +107,9 @@ public ALB.
 
 ## Safety Model
 
-Approval and rejection require a Cognito user in `Manager` or `Admin`.
+Approval and rejection require a Cognito user in `Manager` or `Admin`. Group names
+come only from verified Cognito claims and are matched case-insensitively so legacy
+pool groups such as `admin` retain the same canonical authorization boundary.
 Approval checks the exact stored `planHash`, records an approval decision, and
 requests only the single approved operation from the code-reviewed v1
 remediation catalog through the MCP Tool Gateway, followed by bounded
