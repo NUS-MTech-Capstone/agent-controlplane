@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -51,6 +52,132 @@ func TestExecuteUsesApprovedCatalogOperation(t *testing.T) {
 		!store.hasEvent("VerificationOperationExecuted") || !store.hasEvent("AutomationRunClosed") {
 		t.Fatalf("events = %#v", store.events)
 	}
+	operationEvent := store.eventByType("OperationExecuted")
+	if operationEvent.Metadata["phase"] != "remediate" || operationEvent.Metadata["status"] != "SUCCEEDED" || operationEvent.Metadata["resultDigest"] == "" {
+		t.Fatalf("operation trace metadata = %#v", operationEvent.Metadata)
+	}
+	if _, ok := operationEvent.Metadata["stdout"]; ok {
+		t.Fatalf("operation trace unexpectedly contains stdout: %#v", operationEvent.Metadata)
+	}
+	if _, ok := operationEvent.Metadata["stderr"]; ok {
+		t.Fatalf("operation trace unexpectedly contains stderr: %#v", operationEvent.Metadata)
+	}
+}
+
+func TestExecuteRecordsFailedToolAttempts(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		phase    string
+		result   *model.OperationResult
+		err      error
+		delay    time.Duration
+		timeout  time.Duration
+		exitCode int
+	}{
+		{name: "remediation non-zero exit", phase: "remediate", result: &model.OperationResult{Stderr: "failed", ExitCode: 2}, timeout: time.Second, exitCode: 2},
+		{name: "remediation timeout", phase: "remediate", delay: 20 * time.Millisecond, timeout: time.Millisecond, exitCode: -1},
+		{name: "remediation transport failure", phase: "remediate", err: errors.New("transport unavailable"), timeout: time.Second, exitCode: -1},
+		{name: "verification non-zero exit", phase: "verify", result: &model.OperationResult{Stderr: "unhealthy", ExitCode: 3}, timeout: time.Second, exitCode: 3},
+		{name: "verification timeout", phase: "verify", delay: 20 * time.Millisecond, timeout: time.Millisecond, exitCode: -1},
+		{name: "verification transport failure", phase: "verify", err: errors.New("transport unavailable"), timeout: time.Second, exitCode: -1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			incident := model.Incident{
+				ID: "inc-1", HostID: "host-1", State: model.IncidentExecuting,
+				RunID: "run-1", OperationsURL: "http://dataplane", PlanHash: "hash",
+				Plan: model.Plan{Actions: []model.Action{{OperationID: "restart_service", Reason: "recover service"}}},
+			}
+			operation := "restart_service"
+			if tt.phase == "verify" {
+				operation = "service_status"
+			}
+			gateway := &executeGateway{
+				results: map[string]model.OperationResult{},
+				errors:  map[string]error{},
+				delays:  map[string]time.Duration{},
+			}
+			if tt.result != nil {
+				gateway.results[operation] = *tt.result
+			}
+			if tt.err != nil {
+				gateway.errors[operation] = tt.err
+			}
+			if tt.delay > 0 {
+				gateway.delays[operation] = tt.delay
+			}
+			store := &executeStore{incident: incident}
+			svc := New(store, executeSM{}, &executeSTS{}, gateway, nil, "", tt.timeout, 4096)
+
+			svc.Execute(t.Context(), incident.ID, incident.PlanHash)
+
+			event := store.eventByOperation(operation)
+			if event.Metadata["phase"] != tt.phase || event.Metadata["status"] != "FAILED" {
+				t.Fatalf("tool event = %#v", event)
+			}
+			if got := int(event.Metadata["exitCode"].(int)); got != tt.exitCode {
+				t.Fatalf("exitCode = %d, want %d", got, tt.exitCode)
+			}
+			if digest, _ := event.Metadata["resultDigest"].(string); !strings.HasPrefix(digest, "sha256:") {
+				t.Fatalf("result digest = %q", digest)
+			}
+		})
+	}
+}
+
+func TestIncidentDetailBuildsAuditableTraceAndLegacyDiagnostics(t *testing.T) {
+	now := time.Date(2026, 10, 2, 1, 2, 3, 0, time.UTC)
+	store := &executeStore{
+		incident: model.Incident{
+			ID: "inc-1", UpdatedAt: now,
+			Evidence: []model.OperationResult{{OperationID: "health_check", Stdout: "ok", ExitCode: 0}},
+			Explanation: model.IncidentExplanation{ToolDecisions: []model.ExplanationToolDecision{
+				{OperationID: "health_check", Phase: "diagnose", ChosenBy: "policy", Reason: "mandatory diagnostic"},
+				{OperationID: "restart_service", Phase: "remediate", ChosenBy: "model_proposal", Reason: "recover service"},
+			}},
+		},
+		incidentEvents: []model.IncidentEvent{
+			{ID: "evt-agent", EventType: "AgentDelegated", Message: "Reasoning Agent completed structured triage.", CreatedAt: now.Add(-time.Minute), Metadata: map[string]any{
+				"stage": "triage", "fromAgent": "Incident Manager Agent", "toAgent": "Incident Reasoning Agent",
+				"protocol": "a2a", "actorType": "MODEL_ASSISTED", "status": "SUCCEEDED", "durationMs": 42.5,
+			}},
+			{ID: "evt-tool", EventType: "OperationExecuted", CreatedAt: now, Metadata: map[string]any{
+				"operationId": "restart_service", "phase": "remediate", "status": "SUCCEEDED", "exitCode": 0,
+				"durationMs": 25.0, "resultDigest": "sha256:abc", "outputTruncated": false,
+			}},
+			{ID: "evt-verify", EventType: "VerificationOperationExecuted", CreatedAt: now.Add(-2 * time.Minute), Metadata: map[string]any{
+				"operationId": "service_status", "phase": "verify", "status": "FAILED", "exitCode": 1,
+				"durationMs": 10.0, "resultDigest": "sha256:def", "outputTruncated": true,
+			}},
+		},
+	}
+	svc := New(store, nil, nil, nil, nil, "", time.Second, 4096)
+
+	detail, err := svc.GetIncidentDetail(t.Context(), "inc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := detail.Explanation.Trace
+	if trace.SchemaVersion != "v1" || len(trace.AgentActions) != 1 || len(trace.ToolCalls) != 3 {
+		t.Fatalf("trace = %#v", trace)
+	}
+	if trace.ToolCalls[0].OperationID != "service_status" || trace.ToolCalls[0].Status != "FAILED" {
+		t.Fatalf("chronologically first tool call = %#v", trace.ToolCalls[0])
+	}
+	if trace.ToolCalls[1].OperationID != "restart_service" || trace.ToolCalls[1].SelectedBy != "model_proposal" {
+		t.Fatalf("recorded tool call = %#v", trace.ToolCalls[1])
+	}
+	if trace.ToolCalls[2].OperationID != "health_check" || !strings.HasPrefix(trace.ToolCalls[2].EventID, "legacy-diagnose-") {
+		t.Fatalf("legacy tool call = %#v", trace.ToolCalls[2])
+	}
+	encoded, err := json.Marshal(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"stdout", "stderr", "prompt", "token", "commandBody"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("trace contains forbidden field %q: %s", forbidden, encoded)
+		}
+	}
 }
 
 func TestValidateExecutionRejectsNonRemediationOperation(t *testing.T) {
@@ -72,6 +199,7 @@ func TestIncidentExplanationJSONShape(t *testing.T) {
 				PlannerType:     "bedrock",
 				ModelID:         "global.amazon.nova-2-lite-v1:0",
 				AWSRegion:       "ap-southeast-1",
+				GatewayRoute:    "openai/gpt-5.4-2026-03-05",
 				Temperature:     &temperature,
 				MaxPromptBytes:  1024,
 				PromptTemplates: map[string]string{"plan_system.md.j2": "hash"},
@@ -102,6 +230,7 @@ func TestIncidentExplanationJSONShape(t *testing.T) {
 				ModelAdvisory: true, HumanApprovalRequired: true, ExecutionOwner: "agent-controlplane",
 				TokenIssuer: "sts", TerminalTraffic: "not handled",
 			},
+			Trace: model.ExplanationTrace{SchemaVersion: "v1", AgentActions: []model.ExplanationAgentAction{}, ToolCalls: []model.ExplanationToolCall{}},
 		},
 	}
 	body, err := json.Marshal(incident)
@@ -118,6 +247,9 @@ func TestIncidentExplanationJSONShape(t *testing.T) {
 	}
 	if _, ok := explanation["toolDecisions"]; !ok {
 		t.Fatalf("missing toolDecisions in %s", string(body))
+	}
+	if _, ok := explanation["trace"]; !ok {
+		t.Fatalf("missing trace in %s", string(body))
 	}
 	agents, ok := explanation["agents"].([]any)
 	if !ok || len(agents) != 1 {
@@ -420,6 +552,7 @@ type executeStore struct {
 	eventFilter     model.IncidentEventFilter
 	report          model.PostIncidentReport
 	events          []string
+	eventRecords    []model.IncidentEvent
 	pingErr         error
 	activeIncidents int
 	failedIncidents int
@@ -454,7 +587,7 @@ func (s *executeStore) GetIncident(context.Context, string) (model.Incident, err
 	return s.incident, nil
 }
 func (s *executeStore) ListEvents(context.Context, string) ([]model.IncidentEvent, error) {
-	return nil, nil
+	return s.incidentEvents, nil
 }
 func (s *executeStore) ListIncidentEvents(_ context.Context, filter model.IncidentEventFilter) ([]model.IncidentEvent, error) {
 	s.eventFilter = filter
@@ -469,9 +602,23 @@ func (s *executeStore) IncidentCounts(context.Context) (int, int, error) {
 func (s *executeStore) LastAlertProcessedAt(context.Context) (*time.Time, error) {
 	return s.lastAlert, nil
 }
-func (s *executeStore) CreateEvent(_ context.Context, _, eventType, _, _, _ string, _ map[string]any) (model.IncidentEvent, error) {
+func (s *executeStore) CreateEvent(_ context.Context, incidentID, eventType, alertID, actor, message string, metadata map[string]any) (model.IncidentEvent, error) {
 	s.events = append(s.events, eventType)
-	return model.IncidentEvent{}, nil
+	event := model.IncidentEvent{
+		ID: fmt.Sprintf("evt-%d", len(s.events)), IncidentID: incidentID, AlertID: alertID,
+		EventType: eventType, Actor: actor, Message: message, Metadata: metadata, CreatedAt: time.Now().UTC(),
+	}
+	s.eventRecords = append(s.eventRecords, event)
+	return event, nil
+}
+
+func (s *executeStore) eventByOperation(operation string) model.IncidentEvent {
+	for _, event := range s.eventRecords {
+		if event.Metadata["operationId"] == operation {
+			return event
+		}
+	}
+	return model.IncidentEvent{}
 }
 func (s *executeStore) CreateApprovalDecision(_ context.Context, _ string, decision, planHash, actor string, outcome model.ApprovalOutcome, reason string) error {
 	s.approvals = append(s.approvals, approvalCall{
@@ -506,6 +653,15 @@ func (s *executeStore) hasEvent(eventType string) bool {
 		}
 	}
 	return false
+}
+
+func (s *executeStore) eventByType(eventType string) model.IncidentEvent {
+	for _, event := range s.eventRecords {
+		if event.EventType == eventType {
+			return event
+		}
+	}
+	return model.IncidentEvent{}
 }
 
 type executeSM struct{}
@@ -551,10 +707,27 @@ func (s *executeSTS) ValidateWorkload(context.Context, string) (clients.Workload
 
 type executeGateway struct {
 	operations []string
+	results    map[string]model.OperationResult
+	errors     map[string]error
+	delays     map[string]time.Duration
 }
 
-func (d *executeGateway) Execute(_ context.Context, _ string, operationID, _ string) (model.OperationResult, error) {
+func (d *executeGateway) Execute(ctx context.Context, _ string, operationID, _ string) (model.OperationResult, error) {
 	d.operations = append(d.operations, operationID)
+	if delay := d.delays[operationID]; delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return model.OperationResult{}, ctx.Err()
+		}
+	}
+	if err := d.errors[operationID]; err != nil {
+		return model.OperationResult{}, err
+	}
+	if result, ok := d.results[operationID]; ok {
+		result.OperationID = operationID
+		return result, nil
+	}
 	return model.OperationResult{OperationID: operationID, Stdout: "ok", ExitCode: 0}, nil
 }
 

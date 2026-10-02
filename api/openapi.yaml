@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: DenDenMushi Agent Control Plane API
   version: 0.1.0
-  description: Agentic AI API and internal bounded automation control plane. Business endpoints require the `x-api-version: 1` header; probe and OpenAPI endpoints are exempt.
+  description: "Agentic AI API and internal bounded automation control plane. Business endpoints require the `x-api-version: 1` header; probe and OpenAPI endpoints are exempt."
 paths:
   /healthz:
     get:
@@ -246,6 +246,7 @@ components:
             plannerType: { type: string }
             modelId: { type: string }
             awsRegion: { type: string }
+            gatewayRoute: { type: string }
             temperature: { type: number, nullable: true }
             maxPromptBytes: { type: integer }
             promptTemplates:
@@ -311,3 +312,40 @@ components:
             executionOwner: { type: string }
             tokenIssuer: { type: string }
             terminalTraffic: { type: string }
+        trace:
+          type: object
+          description: Sanitized per-run agent and bounded tool activity. It excludes prompts, model responses, tokens, command bodies, secrets, and terminal streams.
+          properties:
+            schemaVersion: { type: string, enum: [v1] }
+            agentActions:
+              type: array
+              items:
+                type: object
+                properties:
+                  eventId: { type: string }
+                  stage: { type: string }
+                  fromAgent: { type: string }
+                  toAgent: { type: string }
+                  protocol: { type: string }
+                  actorType: { type: string, enum: [MODEL_ASSISTED, DETERMINISTIC] }
+                  status: { type: string, enum: [SUCCEEDED, FALLBACK, FAILED] }
+                  summary: { type: string }
+                  durationMs: { type: number }
+                  fallbackUsed: { type: boolean }
+                  occurredAt: { type: string, format: date-time }
+            toolCalls:
+              type: array
+              items:
+                type: object
+                properties:
+                  eventId: { type: string }
+                  operationId: { type: string }
+                  phase: { type: string, enum: [diagnose, remediate, verify] }
+                  selectedBy: { type: string }
+                  status: { type: string, enum: [SUCCEEDED, FAILED] }
+                  reason: { type: string }
+                  durationMs: { type: number }
+                  exitCode: { type: integer }
+                  resultDigest: { type: string }
+                  outputTruncated: { type: boolean }
+                  occurredAt: { type: string, format: date-time }

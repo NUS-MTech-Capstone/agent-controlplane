@@ -76,6 +76,7 @@ type ExplanationModel struct {
 	PlannerType     string            `json:"plannerType"`
 	ModelID         string            `json:"modelId"`
 	AWSRegion       string            `json:"awsRegion"`
+	GatewayRoute    string            `json:"gatewayRoute"`
 	Temperature     *float64          `json:"temperature"`
 	MaxPromptBytes  int               `json:"maxPromptBytes"`
 	PromptTemplates map[string]string `json:"promptTemplates"`
@@ -123,6 +124,40 @@ type ExplanationAgent struct {
 	HandoffTo        string   `json:"handoffTo"`
 }
 
+type ExplanationAgentAction struct {
+	EventID      string    `json:"eventId"`
+	Stage        string    `json:"stage"`
+	FromAgent    string    `json:"fromAgent"`
+	ToAgent      string    `json:"toAgent"`
+	Protocol     string    `json:"protocol"`
+	ActorType    string    `json:"actorType"`
+	Status       string    `json:"status"`
+	Summary      string    `json:"summary"`
+	DurationMS   float64   `json:"durationMs"`
+	FallbackUsed bool      `json:"fallbackUsed"`
+	OccurredAt   time.Time `json:"occurredAt"`
+}
+
+type ExplanationToolCall struct {
+	EventID         string    `json:"eventId"`
+	OperationID     string    `json:"operationId"`
+	Phase           string    `json:"phase"`
+	SelectedBy      string    `json:"selectedBy"`
+	Status          string    `json:"status"`
+	Reason          string    `json:"reason"`
+	DurationMS      float64   `json:"durationMs"`
+	ExitCode        int       `json:"exitCode"`
+	ResultDigest    string    `json:"resultDigest"`
+	OutputTruncated bool      `json:"outputTruncated"`
+	OccurredAt      time.Time `json:"occurredAt"`
+}
+
+type ExplanationTrace struct {
+	SchemaVersion string                   `json:"schemaVersion"`
+	AgentActions  []ExplanationAgentAction `json:"agentActions"`
+	ToolCalls     []ExplanationToolCall    `json:"toolCalls"`
+}
+
 type IncidentExplanation struct {
 	Model          ExplanationModel          `json:"model"`
 	Workflow       ExplanationWorkflow       `json:"workflow"`
@@ -130,6 +165,7 @@ type IncidentExplanation struct {
 	ToolDecisions  []ExplanationToolDecision `json:"toolDecisions"`
 	Guardrails     []ExplanationGuardrail    `json:"guardrails"`
 	Responsibility ExplanationResponsibility `json:"responsibility"`
+	Trace          ExplanationTrace          `json:"trace"`
 }
 
 type PostIncidentReport struct {
