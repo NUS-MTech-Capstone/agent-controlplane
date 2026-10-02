@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -194,6 +198,7 @@ func (s *Service) GetIncidentDetail(ctx context.Context, incidentID string) (mod
 	if err != nil {
 		return model.IncidentDetail{}, err
 	}
+	incident.Explanation.Trace = buildExplanationTrace(incident, timeline)
 	return model.IncidentDetail{Incident: incident, Timeline: timeline, ApprovalDecisions: decisions}, nil
 }
 
@@ -308,41 +313,42 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		return
 	}
 	_, _ = s.store.CreateEvent(ctx, incidentID, "RemediationStarted", "", "", "Approved remediation execution started.", map[string]any{"planHash": approvedPlanHash})
+	operationStarted := time.Now()
 	operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
 	remediation, err := s.tools.Execute(operationCtx, incident.RunID, operation, incident.PlanHash)
 	cancel()
+	duration := time.Since(operationStarted)
 	if err != nil {
+		failed := model.OperationResult{OperationID: operation, Stderr: truncate(err.Error(), s.maxOutputBytes), ExitCode: -1}
+		s.recordToolCall(ctx, incident, "remediate", operation, failed, duration, wasTruncated(err.Error(), "", s.maxOutputBytes))
 		s.failExecution(ctx, incident, started, err)
 		return
 	}
+	outputTruncated := wasTruncated(remediation.Stdout, remediation.Stderr, s.maxOutputBytes)
 	remediation.Stdout = truncate(remediation.Stdout, s.maxOutputBytes)
 	remediation.Stderr = truncate(remediation.Stderr, s.maxOutputBytes)
+	s.recordToolCall(ctx, incident, "remediate", operation, remediation, duration, outputTruncated)
 	if remediation.ExitCode != 0 {
 		s.failExecution(ctx, incident, started, fmt.Errorf("%s failed with exit code %d: %s", operation, remediation.ExitCode, remediation.Stderr))
 		return
 	}
-	_, _ = s.store.CreateEvent(ctx, incidentID, "OperationExecuted", "", "", "Approved remediation operation executed.", map[string]any{
-		"operation": operation,
-		"exitCode":  remediation.ExitCode,
-		"planHash":  incident.PlanHash,
-	})
 	verification := make([]model.OperationResult, 0, len(catalog.VerifyOperations))
 	success := true
 	for _, operation := range catalog.VerifyOperations {
+		operationStarted := time.Now()
 		operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
 		result, err := s.tools.Execute(operationCtx, incident.RunID, operation, incident.PlanHash)
 		cancel()
+		duration := time.Since(operationStarted)
 		if err != nil {
 			result = model.OperationResult{OperationID: operation, Stderr: truncate(err.Error(), s.maxOutputBytes), ExitCode: -1}
 		}
+		outputTruncated := wasTruncated(result.Stdout, result.Stderr, s.maxOutputBytes)
 		result.Stdout = truncate(result.Stdout, s.maxOutputBytes)
 		result.Stderr = truncate(result.Stderr, s.maxOutputBytes)
 		verification = append(verification, result)
 		success = success && result.ExitCode == 0
-		_, _ = s.store.CreateEvent(ctx, incidentID, "VerificationOperationExecuted", "", "", "Post-remediation verification operation executed.", map[string]any{
-			"operation": operation,
-			"exitCode":  result.ExitCode,
-		})
+		s.recordToolCall(ctx, incident, "verify", operation, result, duration, outputTruncated)
 	}
 	state := model.IncidentCompleted
 	alertStatus := model.AlertResolved
@@ -382,6 +388,164 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 	_ = s.sm.CloseAutomationRun(ctx, incident.RunID)
 	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationRunClosed", "", "", "Automation run closed after remediation workflow.", map[string]any{"runId": incident.RunID})
 	slog.InfoContext(ctx, eventType, "requestId", observability.RequestID(ctx), "incidentId", incidentID, "runId", incident.RunID, "hostId", incident.HostID, "planHash", incident.PlanHash)
+}
+
+func (s *Service) recordToolCall(ctx context.Context, incident model.Incident, phase, operation string, result model.OperationResult, duration time.Duration, outputTruncated bool) {
+	selectedBy, reason := toolDecision(incident.Explanation.ToolDecisions, phase, operation)
+	status := "SUCCEEDED"
+	if result.ExitCode != 0 {
+		status = "FAILED"
+	}
+	eventType := "OperationExecuted"
+	message := "Bounded operation executed."
+	if phase == "verify" {
+		eventType = "VerificationOperationExecuted"
+		message = "Post-remediation verification operation executed."
+	} else if phase == "remediate" {
+		message = "Approved remediation operation executed."
+	}
+	_, _ = s.store.CreateEvent(ctx, incident.ID, eventType, "", "", message, map[string]any{
+		"operationId":     operation,
+		"phase":           phase,
+		"selectedBy":      selectedBy,
+		"reason":          reason,
+		"status":          status,
+		"durationMs":      float64(duration.Microseconds()) / 1000,
+		"exitCode":        result.ExitCode,
+		"resultDigest":    operationResultDigest(result),
+		"outputTruncated": outputTruncated,
+		"planHash":        incident.PlanHash,
+	})
+}
+
+func buildExplanationTrace(incident model.Incident, timeline []model.IncidentEvent) model.ExplanationTrace {
+	trace := model.ExplanationTrace{
+		SchemaVersion: "v1",
+		AgentActions:  []model.ExplanationAgentAction{},
+		ToolCalls:     []model.ExplanationToolCall{},
+	}
+	for _, event := range timeline {
+		switch event.EventType {
+		case "AgentDelegated":
+			trace.AgentActions = append(trace.AgentActions, model.ExplanationAgentAction{
+				EventID: event.ID, Stage: metadataString(event.Metadata, "stage"),
+				FromAgent: metadataString(event.Metadata, "fromAgent"), ToAgent: metadataString(event.Metadata, "toAgent"),
+				Protocol: metadataString(event.Metadata, "protocol"), ActorType: metadataString(event.Metadata, "actorType"),
+				Status: metadataString(event.Metadata, "status"), Summary: event.Message,
+				DurationMS: metadataFloat(event.Metadata, "durationMs"), FallbackUsed: metadataBool(event.Metadata, "fallbackUsed"),
+				OccurredAt: event.CreatedAt,
+			})
+		case "OperationExecuted", "VerificationOperationExecuted":
+			operation := metadataString(event.Metadata, "operationId")
+			if operation == "" {
+				operation = metadataString(event.Metadata, "operation")
+			}
+			if operation == "" {
+				continue
+			}
+			phase := metadataString(event.Metadata, "phase")
+			if phase == "" && event.EventType == "VerificationOperationExecuted" {
+				phase = "verify"
+			} else if phase == "" {
+				phase = "remediate"
+			}
+			selectedBy, reason := toolDecision(incident.Explanation.ToolDecisions, phase, operation)
+			if value := metadataString(event.Metadata, "selectedBy"); value != "" {
+				selectedBy = value
+			}
+			if value := metadataString(event.Metadata, "reason"); value != "" {
+				reason = value
+			}
+			status := metadataString(event.Metadata, "status")
+			exitCode := metadataInt(event.Metadata, "exitCode")
+			if status == "" {
+				status = "SUCCEEDED"
+				if exitCode != 0 {
+					status = "FAILED"
+				}
+			}
+			trace.ToolCalls = append(trace.ToolCalls, model.ExplanationToolCall{
+				EventID: event.ID, OperationID: operation, Phase: phase, SelectedBy: selectedBy,
+				Status: status, Reason: reason, DurationMS: metadataFloat(event.Metadata, "durationMs"),
+				ExitCode: exitCode, ResultDigest: metadataString(event.Metadata, "resultDigest"),
+				OutputTruncated: metadataBool(event.Metadata, "outputTruncated"), OccurredAt: event.CreatedAt,
+			})
+		}
+	}
+	for index, result := range incident.Evidence {
+		if hasToolCall(trace.ToolCalls, "diagnose", result.OperationID) {
+			continue
+		}
+		selectedBy, reason := toolDecision(incident.Explanation.ToolDecisions, "diagnose", result.OperationID)
+		status := "SUCCEEDED"
+		if result.ExitCode != 0 {
+			status = "FAILED"
+		}
+		trace.ToolCalls = append(trace.ToolCalls, model.ExplanationToolCall{
+			EventID: fmt.Sprintf("legacy-diagnose-%d", index+1), OperationID: result.OperationID,
+			Phase: "diagnose", SelectedBy: selectedBy, Status: status, Reason: reason,
+			ExitCode: result.ExitCode, ResultDigest: operationResultDigest(result), OccurredAt: incident.UpdatedAt,
+		})
+	}
+	sort.SliceStable(trace.AgentActions, func(i, j int) bool { return trace.AgentActions[i].OccurredAt.Before(trace.AgentActions[j].OccurredAt) })
+	sort.SliceStable(trace.ToolCalls, func(i, j int) bool { return trace.ToolCalls[i].OccurredAt.Before(trace.ToolCalls[j].OccurredAt) })
+	return trace
+}
+
+func toolDecision(decisions []model.ExplanationToolDecision, phase, operation string) (string, string) {
+	for _, decision := range decisions {
+		if decision.Phase == phase && decision.OperationID == operation {
+			return decision.ChosenBy, decision.Reason
+		}
+	}
+	return "policy", "Bounded operation selected by deterministic policy."
+}
+
+func hasToolCall(calls []model.ExplanationToolCall, phase, operation string) bool {
+	for _, call := range calls {
+		if call.Phase == phase && call.OperationID == operation {
+			return true
+		}
+	}
+	return false
+}
+
+func operationResultDigest(result model.OperationResult) string {
+	payload, _ := json.Marshal(map[string]any{
+		"exitCode": result.ExitCode, "operationId": result.OperationID,
+		"stderr": result.Stderr, "stdout": result.Stdout,
+	})
+	digest := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	value, _ := metadata[key].(string)
+	return value
+}
+
+func metadataFloat(metadata map[string]any, key string) float64 {
+	switch value := metadata[key].(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int64:
+		return float64(value)
+	default:
+		return 0
+	}
+}
+
+func metadataInt(metadata map[string]any, key string) int {
+	return int(metadataFloat(metadata, key))
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	value, _ := metadata[key].(bool)
+	return value
 }
 
 func (s *Service) failExecution(ctx context.Context, incident model.Incident, started time.Time, cause error) {
@@ -582,4 +746,8 @@ func truncate(value string, maxBytes int) string {
 		return value
 	}
 	return value[:maxBytes]
+}
+
+func wasTruncated(stdout, stderr string, maxBytes int) bool {
+	return maxBytes > 0 && (len(stdout) > maxBytes || len(stderr) > maxBytes)
 }

@@ -24,7 +24,12 @@ func TestAgenticHandlersServeJSONAndHTML(t *testing.T) {
 			PlanHash: "hash", Plan: model.Plan{Summary: "Restart", Actions: []model.Action{{OperationID: "restart_service", Reason: "hung"}}},
 			Explanation: model.IncidentExplanation{Workflow: model.ExplanationWorkflow{CatalogVersion: "v1"}},
 		},
-		events: []model.IncidentEvent{{ID: "evt-1", IncidentID: "inc-1", EventType: "PlanProposed"}},
+		events: []model.IncidentEvent{
+			{ID: "evt-1", IncidentID: "inc-1", EventType: "PlanProposed"},
+			{ID: "evt-2", IncidentID: "inc-1", EventType: "OperationExecuted", Metadata: map[string]any{
+				"operationId": "health_check", "phase": "diagnose", "status": "SUCCEEDED", "exitCode": 0,
+			}},
+		},
 	}
 	server := New(service.New(store, nil, nil, nil, nil, "", time.Second, 1024), fakeVerifier{})
 
@@ -37,7 +42,9 @@ func TestAgenticHandlersServeJSONAndHTML(t *testing.T) {
 	}
 
 	rec = serveAgentic(t, server, http.MethodGet, "/alerts/alert-1", "", "application/json")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"timeline"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"timeline"`) ||
+		!strings.Contains(rec.Body.String(), `"trace":{"schemaVersion":"v1"`) ||
+		!strings.Contains(rec.Body.String(), `"operationId":"health_check"`) {
 		t.Fatalf("alert detail status=%d body=%s", rec.Code, rec.Body.String())
 	}
 

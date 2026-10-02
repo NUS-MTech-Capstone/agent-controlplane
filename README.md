@@ -122,10 +122,22 @@ Incident detail responses include an additive `explanation` object populated by
 Incident Agent. It shows safe model metadata, catalog version, named runtime
 agents, reasoning types, memory scope, tools, inputs, outputs, handoffs,
 diagnostic and verification operation IDs, tool-selection reasons, guardrail
-outcomes, and responsibility boundaries. Agent Control Plane also records
-timeline metadata for automation token issuance, approved operation execution,
-verification operations, and automation run closeout. Tokens, command bodies,
-prompts, raw model responses, secrets, and terminal streams are never returned.
+outcomes, and responsibility boundaries. `explanation.trace` is a versioned,
+sanitized projection of append-only `incident_events`. Its `agentActions`
+distinguish successful, failed, and deterministic-fallback A2A handoffs; its
+`toolCalls` record diagnose, remediate, and verify operation IDs, selection
+authority, status, duration, exit code, truncation, and a SHA-256 digest of the
+already bounded/redacted result. Agent Control Plane joins selection reasons
+from `toolDecisions`, orders trace entries chronologically, and reconstructs
+diagnostic calls from stored evidence for older incidents when detailed event
+metadata is unavailable. `GET /incidents/{incidentId}` and the incident nested
+under `GET /alerts/{alertId}` use the same additive contract.
+
+Remediation and verification attempts are written before normal failure
+handling, so non-zero exits, timeouts, and transport errors remain visible.
+Timeline metadata also covers automation token issuance and run closeout.
+Tokens, command bodies, prompts, raw provider reasoning, unrestricted
+arguments, secrets, and terminal streams are never returned.
 
 The physical A2A boundary separates durable coordination from stateless model
 reasoning, while the named workflow roles remain useful explainability labels.
