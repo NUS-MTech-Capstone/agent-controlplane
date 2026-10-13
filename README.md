@@ -171,3 +171,18 @@ immutable-image GitOps flow; the evaluation itself does not deploy changes.
 go test ./...
 go run ./cmd/server
 ```
+
+## API contract verification
+
+`api/openapi.yaml` is the checked-in HTTP contract, served byte-for-byte at
+`GET /openapi.yaml`. CI validates it with `openapi-spec-validator==0.9.0`.
+Handler tests validate representative success and error responses against its
+schemas, including missing and unsupported API versions. Business HTTP calls
+require `x-api-version: 1`; the specification declares route exemptions and
+any transport-specific alternatives. Run the repository test suite when
+changing handlers or response models, and update the contract in the same PR.
+
+The Image workflow runs only after successful CI for a push to `main`. It builds
+the tested source SHA, retains that SHA as a traceability tag, and promotes the
+build's `sha256` digest through a Kubernetes PR. Promotion requires the digest;
+Argo CD deploys that immutable reference after the GitOps PR is merged.

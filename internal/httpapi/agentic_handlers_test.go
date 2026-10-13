@@ -17,8 +17,8 @@ import (
 
 func TestAgenticHandlersServeJSONAndHTML(t *testing.T) {
 	store := &handlerStore{
-		alerts: []model.ManagedAlert{{ID: "alert-1", IncidentID: "inc-1", HostID: "host-1"}},
-		alert:  model.ManagedAlert{ID: "alert-1", IncidentID: "inc-1", HostID: "host-1"},
+		alerts: []model.ManagedAlert{{ID: "alert-1", IncidentID: "inc-1", HostID: "host-1", Status: model.AlertTriaged}},
+		alert:  model.ManagedAlert{ID: "alert-1", IncidentID: "inc-1", HostID: "host-1", Status: model.AlertTriaged},
 		incident: model.Incident{
 			ID: "inc-1", AlarmName: "CPUHigh", HostID: "host-1", State: model.IncidentAwaitingApproval,
 			PlanHash: "hash", Plan: model.Plan{Summary: "Restart", Actions: []model.Action{{OperationID: "restart_service", Reason: "hung"}}},
@@ -170,6 +170,7 @@ func serveAgentic(t *testing.T, server http.Handler, method, path, body, accept 
 	req.Header.Set("Accept", accept)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
+	assertContractResponse(t, method, path, rec)
 	return rec
 }
 
@@ -261,3 +262,23 @@ func (s *handlerStore) SetIncidentReport(context.Context, string, model.Incident
 	return nil
 }
 func (s *handlerStore) SetFailure(context.Context, string, string) error { return nil }
+
+func TestDecisionContractsRejectMissingHashes(t *testing.T) {
+	server := New(nil, fakeVerifier{})
+	for _, action := range []string{"approve", "reject"} {
+		for _, body := range []string{`{}`, `{"planHash":" "}`, `{`} {
+			path := "/incidents/fixture/" + action
+			req := httptest.NewRequest("POST", path, strings.NewReader(body))
+			req.Header.Set("x-api-version", "1")
+			req.Header.Set("x-amzn-oidc-data", "signed-fixture")
+			req.Header.Set("x-amzn-oidc-identity", "user-1")
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != 400 {
+				t.Fatalf("%s missing hash status %d", action, rec.Code)
+			}
+			assertContractResponse(t, "POST", path, rec)
+		}
+	}
+}
