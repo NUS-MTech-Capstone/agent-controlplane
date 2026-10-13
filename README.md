@@ -147,6 +147,26 @@ and live terminal traffic still bypasses Agent Control Plane.
 
 ## Development
 
+R12 executor evaluations live in `internal/service/r12_evaluation_test.go`.
+They exercise the real service with simulated tools, authorization and session
+metadata; no test invokes live remediation. `go test -json ./internal/service
+-run '^TestR12RoleCases$' -count=1` emits `R12_RECORD` JSON lines consumed by
+the sibling Incident Agent evaluation runner. Records contain synthetic
+expected/actual outcomes for all five behavior categories, without tokens or
+raw tool output. See `../documentation/R12_SIX_ROLE_EVALUATION.md` for results.
+
+After execution validation succeeds, automation-run cleanup now executes on
+both successful and failed remediation paths, including uncertain transport
+responses. Mutations are still never automatically retried. Cleanup uses a
+separate context bounded by `OPERATION_TIMEOUT_SECONDS`, so request cancellation
+does not skip it. `AutomationRunClosed` is recorded only after successful close;
+`AutomationRunCloseFailed` records unavailable cleanup, with run TTL as the
+fallback. Rejected execution requests do not close another active run.
+
+This change adds no endpoint, payload or schema requirement. Incident Agent
+and Agent Control Plane images can be promoted independently through the normal
+immutable-image GitOps flow; the evaluation itself does not deploy changes.
+
 ```bash
 go test ./...
 go run ./cmd/server
