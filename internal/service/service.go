@@ -312,6 +312,7 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		s.failExecution(ctx, incident, started, err)
 		return
 	}
+	defer s.closeExecutionRun(ctx, incident)
 	_, _ = s.store.CreateEvent(ctx, incidentID, "RemediationStarted", "", "", "Approved remediation execution started.", map[string]any{"planHash": approvedPlanHash})
 	operationStarted := time.Now()
 	operationCtx, cancel := context.WithTimeout(ctx, s.operationTimeout)
@@ -385,9 +386,19 @@ func (s *Service) Execute(ctx context.Context, incidentID, approvedPlanHash stri
 		verifyMessage = "Post-remediation verification failed."
 	}
 	_, _ = s.store.CreateEvent(ctx, incidentID, verifyEvent, "", "", verifyMessage, map[string]any{"operationCount": len(verification)})
-	_ = s.sm.CloseAutomationRun(ctx, incident.RunID)
-	_, _ = s.store.CreateEvent(ctx, incidentID, "AutomationRunClosed", "", "", "Automation run closed after remediation workflow.", map[string]any{"runId": incident.RunID})
 	slog.InfoContext(ctx, eventType, "requestId", observability.RequestID(ctx), "incidentId", incidentID, "runId", incident.RunID, "hostId", incident.HostID, "planHash", incident.PlanHash)
+}
+
+func (s *Service) closeExecutionRun(ctx context.Context, incident model.Incident) {
+	// A lost mutation response is never retried. Release its run even after the
+	// request deadline, with a separate bounded cleanup deadline.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.operationTimeout)
+	defer cancel()
+	if err := s.sm.CloseAutomationRun(cleanupCtx, incident.RunID); err != nil {
+		_, _ = s.store.CreateEvent(cleanupCtx, incident.ID, "AutomationRunCloseFailed", "", "", "Automation run cleanup failed; TTL remains the fallback.", map[string]any{"runId": incident.RunID})
+		return
+	}
+	_, _ = s.store.CreateEvent(cleanupCtx, incident.ID, "AutomationRunClosed", "", "", "Automation run closed after remediation workflow.", map[string]any{"runId": incident.RunID})
 }
 
 func (s *Service) recordToolCall(ctx context.Context, incident model.Incident, phase, operation string, result model.OperationResult, duration time.Duration, outputTruncated bool) {

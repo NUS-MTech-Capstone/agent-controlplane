@@ -147,7 +147,42 @@ and live terminal traffic still bypasses Agent Control Plane.
 
 ## Development
 
+R12 executor evaluations live in `internal/service/r12_evaluation_test.go`.
+They exercise the real service with simulated tools, authorization and session
+metadata; no test invokes live remediation. `go test -json ./internal/service
+-run '^TestR12RoleCases$' -count=1` emits `R12_RECORD` JSON lines consumed by
+the sibling Incident Agent evaluation runner. Records contain synthetic
+expected/actual outcomes for all five behavior categories, without tokens or
+raw tool output. See `../documentation/R12_SIX_ROLE_EVALUATION.md` for results.
+
+After execution validation succeeds, automation-run cleanup now executes on
+both successful and failed remediation paths, including uncertain transport
+responses. Mutations are still never automatically retried. Cleanup uses a
+separate context bounded by `OPERATION_TIMEOUT_SECONDS`, so request cancellation
+does not skip it. `AutomationRunClosed` is recorded only after successful close;
+`AutomationRunCloseFailed` records unavailable cleanup, with run TTL as the
+fallback. Rejected execution requests do not close another active run.
+
+This change adds no endpoint, payload or schema requirement. Incident Agent
+and Agent Control Plane images can be promoted independently through the normal
+immutable-image GitOps flow; the evaluation itself does not deploy changes.
+
 ```bash
 go test ./...
 go run ./cmd/server
 ```
+
+## API contract verification
+
+`api/openapi.yaml` is the checked-in HTTP contract, served byte-for-byte at
+`GET /openapi.yaml`. CI validates it with `openapi-spec-validator==0.9.0`.
+Handler tests validate representative success and error responses against its
+schemas, including missing and unsupported API versions. Business HTTP calls
+require `x-api-version: 1`; the specification declares route exemptions and
+any transport-specific alternatives. Run the repository test suite when
+changing handlers or response models, and update the contract in the same PR.
+
+The Image workflow runs only after successful CI for a push to `main`. It builds
+the tested source SHA, retains that SHA as a traceability tag, and promotes the
+build's `sha256` digest through a Kubernetes PR. Promotion requires the digest;
+Argo CD deploys that immutable reference after the GitOps PR is merged.

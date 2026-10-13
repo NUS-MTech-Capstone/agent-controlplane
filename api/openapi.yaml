@@ -2,230 +2,569 @@ openapi: 3.1.0
 info:
   title: DenDenMushi Agent Control Plane API
   version: 0.1.0
-  description: "Agentic AI API and internal bounded automation control plane. Business endpoints require the `x-api-version: 1` header; probe and OpenAPI endpoints are exempt."
+  description: 'Agentic AI API and internal bounded automation control plane. Business endpoints require the `x-api-version:
+    1` header; probe and OpenAPI endpoints are exempt.'
 paths:
   /healthz:
     get:
       summary: Liveness probe
       responses:
-        "200":
-          description: OK
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+      security: []
   /readyz:
     get:
       summary: Readiness probe
       responses:
-        "200":
-          description: Ready
-        "503":
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
           description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security: []
   /agentic-ai/health:
     get:
       summary: Agentic AI operational health
       security:
-        - albCognito: []
+      - albCognito: []
       responses:
-        "200":
-          description: Safe health metadata.
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHealth'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      parameters:
+      - $ref: '#/components/parameters/APIVersion'
   /alerts:
     get:
       summary: List managed-server alerts
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: incidentId
-          in: query
-          schema: { type: string }
-        - name: hostId
-          in: query
-          schema: { type: string }
-        - name: status
-          in: query
-          schema: { type: string }
-        - name: cloudwatchState
-          in: query
-          schema: { type: string }
-        - name: from
-          in: query
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          schema: { type: string, format: date-time }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 200 }
-        - name: cursor
-          in: query
-          schema: { type: integer, minimum: 0 }
+      - name: incidentId
+        in: query
+        schema:
+          type: string
+      - name: hostId
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: cloudwatchState
+        in: query
+        schema:
+          type: string
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: string
+        description: Nonnegative integer text; malformed or negative values use the default. The store bounds page
+          size.
+      - name: cursor
+        in: query
+        schema:
+          type: string
+        description: Nonnegative integer text; malformed or negative values use the default. The store bounds page
+          size.
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Alert list.
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
   /alerts/{alertId}:
     get:
       summary: Get one managed-server alert
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: alertId
-          in: path
-          required: true
-          schema: { type: string }
+      - name: alertId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Alert detail.
-        "404":
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertDetail'
+        '404':
           description: Alert not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
   /incidents:
     get:
       summary: List incidents
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: incidentId
-          in: query
-          schema: { type: string }
-        - name: alertId
-          in: query
-          schema: { type: string }
-        - name: hostId
-          in: query
-          schema: { type: string }
-        - name: state
-          in: query
-          schema: { type: string }
-        - name: from
-          in: query
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          schema: { type: string, format: date-time }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 200 }
-        - name: cursor
-          in: query
-          schema: { type: integer, minimum: 0 }
+      - name: incidentId
+        in: query
+        schema:
+          type: string
+      - name: alertId
+        in: query
+        schema:
+          type: string
+      - name: hostId
+        in: query
+        schema:
+          type: string
+      - name: state
+        in: query
+        schema:
+          type: string
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: string
+        description: Nonnegative integer text; malformed or negative values use the default. The store bounds page
+          size.
+      - name: cursor
+        in: query
+        schema:
+          type: string
+        description: Nonnegative integer text; malformed or negative values use the default. The store bounds page
+          size.
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Incident list or HTML page.
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentListResponse'
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      description: 'Send Accept: application/json for the JSON contract; otherwise returns the operator HTML view.'
   /incidents/events:
     get:
       summary: Query Agentic AI incident timeline metadata events
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: incidentId
-          in: query
-          schema: { type: string }
-        - name: alertId
-          in: query
-          schema: { type: string }
-        - name: eventType
-          in: query
-          schema: { type: string }
-        - name: actor
-          in: query
-          schema: { type: string }
-        - name: from
-          in: query
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          schema: { type: string, format: date-time }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 200 }
-        - name: cursor
-          in: query
-          schema: { type: integer, minimum: 0 }
+      - name: incidentId
+        in: query
+        schema:
+          type: string
+      - name: alertId
+        in: query
+        schema:
+          type: string
+      - name: eventType
+        in: query
+        schema:
+          type: string
+      - name: actor
+        in: query
+        schema:
+          type: string
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: string
+        description: Nonnegative integer text; malformed or negative values use the default. The store bounds page
+          size.
+      - name: cursor
+        in: query
+        schema:
+          type: string
+        description: Nonnegative integer text; malformed or negative values use the default. The store bounds page
+          size.
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Metadata event list without prompts, tokens, secrets, or terminal streams.
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentEventListResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
   /incidents/{incidentId}:
     get:
       summary: Get one incident
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: incidentId
-          in: path
-          required: true
-          schema: { type: string }
+      - name: incidentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Incident detail or HTML page.
+        '200':
+          description: Successful response.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  explanation:
-                    $ref: "#/components/schemas/IncidentExplanation"
-        "404":
+                $ref: '#/components/schemas/IncidentDetail'
+            text/html:
+              schema:
+                type: string
+        '404':
           description: Incident not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      description: 'Send Accept: application/json for the JSON contract; otherwise returns the operator HTML view.'
   /incidents/{incidentId}/approve:
     post:
       summary: Approve an exact stored remediation plan
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: incidentId
-          in: path
-          required: true
-          schema: { type: string }
+      - name: incidentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Updated incident detail for JSON callers, or redirect for HTML callers.
-        "403":
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+        '403':
           description: Manager or Admin group required.
-        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
           description: Plan hash drift or expiry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '303':
+          description: HTML form callers redirect to the incident detail.
+          headers:
+            Location:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planHash:
+                  type: string
+                  minLength: 1
+                  pattern: \S
+              required:
+              - planHash
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                planHash:
+                  type: string
+                  minLength: 1
+                  pattern: \S
+              required:
+              - planHash
   /incidents/{incidentId}/reject:
     post:
       summary: Reject an exact stored remediation plan
       security:
-        - albCognito: []
+      - albCognito: []
       parameters:
-        - name: incidentId
-          in: path
-          required: true
-          schema: { type: string }
+      - name: incidentId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "200":
-          description: Updated incident detail for JSON callers, or redirect for HTML callers.
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+        '400':
+          $ref: '#/components/responses/Error'
+        '303':
+          description: HTML form callers redirect to the incident detail.
+          headers:
+            Location:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planHash:
+                  type: string
+                  minLength: 1
+                  pattern: \S
+              required:
+              - planHash
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                planHash:
+                  type: string
+                  minLength: 1
+                  pattern: \S
+              required:
+              - planHash
   /automation/runs/start:
     post:
       summary: Start a bounded automation run
       security:
-        - bearerAuth: []
+      - bearerAuth: []
       responses:
-        "201":
-          description: Active automation run metadata; no capability token is returned.
+        '201':
+          description: Assigned run. capabilityToken is empty and tokenExpiresAt is the zero timestamp; request
+            authority separately at /token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationRunResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      parameters:
+      - $ref: '#/components/parameters/APIVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationRunRequest'
   /automation/runs/{runId}/token:
     post:
       summary: Issue a state-checked capability to the authenticated Tool Gateway
       security:
-        - bearerAuth: []
+      - bearerAuth: []
       parameters:
-        - name: runId
-          in: path
-          required: true
-          schema: { type: string }
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "201":
-          description: Automation run and capability token.
+        '201':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationRunResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationTokenRequest'
   /automation/runs/{runId}/close:
     post:
       summary: Close an automation run for the authenticated coordinator
       security:
-        - bearerAuth: []
+      - bearerAuth: []
       parameters:
-        - name: runId
-          in: path
-          required: true
-          schema: { type: string }
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/APIVersion'
       responses:
-        "204":
+        '204':
           description: Closed.
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+  /openapi.yaml:
+    get:
+      summary: Checked-in OpenAPI specification
+      responses:
+        '200':
+          description: Exact api/openapi.yaml bytes.
+          content:
+            application/yaml:
+              schema:
+                type: string
+      security: []
 components:
   securitySchemes:
     albCognito:
@@ -237,115 +576,1042 @@ components:
       scheme: bearer
   schemas:
     IncidentExplanation:
+      properties:
+        agents:
+          items:
+            $ref: '#/components/schemas/ExplanationAgent'
+          type:
+          - array
+          - 'null'
+        guardrails:
+          items:
+            $ref: '#/components/schemas/ExplanationGuardrail'
+          type:
+          - array
+          - 'null'
+        model:
+          $ref: '#/components/schemas/ExplanationModel'
+        responsibility:
+          $ref: '#/components/schemas/ExplanationResponsibility'
+        toolDecisions:
+          items:
+            $ref: '#/components/schemas/ExplanationToolDecision'
+          type:
+          - array
+          - 'null'
+        trace:
+          $ref: '#/components/schemas/ExplanationTrace'
+        workflow:
+          $ref: '#/components/schemas/ExplanationWorkflow'
+      required:
+      - model
+      - workflow
+      - agents
+      - toolDecisions
+      - guardrails
+      - responsibility
+      - trace
+      type: object
+    HealthResponse:
       type: object
       properties:
-        model:
-          type: object
-          properties:
-            provider: { type: string }
-            plannerType: { type: string }
-            modelId: { type: string }
-            awsRegion: { type: string }
-            gatewayRoute: { type: string }
-            temperature: { type: number, nullable: true }
-            maxPromptBytes: { type: integer }
-            promptTemplates:
-              type: object
-              additionalProperties: { type: string }
-        workflow:
-          type: object
-          properties:
-            graphVersion: { type: string }
-            catalogVersion: { type: string }
-            diagnosticOperations:
-              type: array
-              items: { type: string }
-            verificationOperations:
-              type: array
-              items: { type: string }
-            runId: { type: string }
-            planHash: { type: string }
-        agents:
+        status:
+          type: string
+      required:
+      - status
+    ErrorResponse:
+      properties:
+        error:
+          type: string
+      required:
+      - error
+      type: object
+    Action:
+      properties:
+        operationId:
+          type: string
+        reason:
+          type: string
+      required:
+      - operationId
+      - reason
+      type: object
+    AgentHealth:
+      properties:
+        activeIncidentCount:
+          type: integer
+        databaseReady:
+          type: boolean
+        failedIncidentCount:
+          type: integer
+        lastAlertProcessedAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        lastErrorSummary:
+          type: string
+        queueConsumerConfigured:
+          type: boolean
+        queueConsumerRunning:
+          type: boolean
+      required:
+      - databaseReady
+      - queueConsumerConfigured
+      - queueConsumerRunning
+      - lastAlertProcessedAt
+      - lastErrorSummary
+      - activeIncidentCount
+      - failedIncidentCount
+      type: object
+    AlertDetail:
+      properties:
+        alarmArn:
+          type: string
+        alarmName:
+          type: string
+        cloudwatchState:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        errorSummary:
+          type: string
+        groupKey:
+          type: string
+        grouped:
+          type: boolean
+        hostId:
+          type: string
+        id:
+          type: string
+        incident:
+          anyOf:
+          - $ref: '#/components/schemas/IncidentDetail'
+          - type: 'null'
+        incidentId:
+          type: string
+        occurredAt:
+          format: date-time
+          type: string
+        reason:
+          type: string
+        sourceId:
+          type: string
+        sourceType:
+          type: string
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        timeline:
+          items:
+            $ref: '#/components/schemas/IncidentEvent'
+          type:
+          - array
+          - 'null'
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - sourceId
+      - sourceType
+      - alarmArn
+      - alarmName
+      - cloudwatchState
+      - hostId
+      - reason
+      - status
+      - groupKey
+      - incidentId
+      - grouped
+      - errorSummary
+      - occurredAt
+      - createdAt
+      - updatedAt
+      - incident
+      - timeline
+      type: object
+    AlertListResponse:
+      properties:
+        alerts:
+          items:
+            $ref: '#/components/schemas/ManagedAlert'
+          type:
+          - array
+          - 'null'
+        nextCursor:
+          type: string
+      required:
+      - alerts
+      type: object
+    AlertStatus:
+      type: string
+      enum:
+      - RECEIVED
+      - TRIAGING
+      - TRIAGED
+      - PENDING_APPROVAL
+      - EXECUTING
+      - RESOLVED
+      - REJECTED
+      - FAILED
+    ApprovalDecisionAudit:
+      properties:
+        actor:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        decision:
+          type: string
+        errorReason:
+          type: string
+        id:
+          type: string
+        incidentId:
+          type: string
+        outcome:
+          $ref: '#/components/schemas/ApprovalOutcome'
+        submittedPlanHash:
+          type: string
+      required:
+      - id
+      - incidentId
+      - actor
+      - decision
+      - submittedPlanHash
+      - outcome
+      - errorReason
+      - createdAt
+      type: object
+    ApprovalOutcome:
+      type: string
+      enum:
+      - SUCCEEDED
+      - DENIED
+      - CONFLICT
+      - NOT_FOUND
+    AutomationRun:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+        hostId:
+          type: string
+        incidentId:
+          type: string
+        operationsUrl:
+          type: string
+        ownerInstanceId:
+          type: string
+        ownerPodId:
+          type: string
+        runId:
+          type: string
+        status:
+          type: string
+      required:
+      - runId
+      - incidentId
+      - hostId
+      - ownerPodId
+      - ownerInstanceId
+      - operationsUrl
+      - status
+      - createdAt
+      - expiresAt
+      type: object
+    AutomationRunRequest:
+      properties:
+        allowedOperations:
           type: array
           items:
-            type: object
-            properties:
-              name: { type: string }
-              purpose: { type: string }
-              responsibilities:
-                type: array
-                items: { type: string }
-              reasoningType: { type: string }
-              memory: { type: string }
-              tools:
-                type: array
-                items: { type: string }
-              inputs:
-                type: array
-                items: { type: string }
-              outputs:
-                type: array
-                items: { type: string }
-              handoffTo: { type: string }
-        toolDecisions:
+            type: string
+            minLength: 1
+          minItems: 1
+        hostId:
+          type: string
+          minLength: 1
+        incidentId:
+          type: string
+          minLength: 1
+        phase:
+          type: string
+          minLength: 1
+        planHash:
+          type: string
+      required:
+      - incidentId
+      - hostId
+      - phase
+      - allowedOperations
+      type: object
+    AutomationRunResponse:
+      properties:
+        capabilityToken:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+        hostId:
+          type: string
+        incidentId:
+          type: string
+        operationsUrl:
+          type: string
+        ownerInstanceId:
+          type: string
+        ownerPodId:
+          type: string
+        runId:
+          type: string
+        status:
+          type: string
+        tokenExpiresAt:
+          format: date-time
+          type: string
+      required:
+      - runId
+      - incidentId
+      - hostId
+      - ownerPodId
+      - ownerInstanceId
+      - operationsUrl
+      - status
+      - createdAt
+      - expiresAt
+      - capabilityToken
+      - tokenExpiresAt
+      type: object
+    AutomationTokenRequest:
+      properties:
+        allowedOperations:
           type: array
           items:
-            type: object
-            properties:
-              operationId: { type: string }
-              phase: { type: string }
-              chosenBy: { type: string }
-              reason: { type: string }
-        guardrails:
-          type: array
+            type: string
+            minLength: 1
+          minItems: 1
+        phase:
+          type: string
+          minLength: 1
+        planHash:
+          type: string
+      required:
+      - phase
+      - allowedOperations
+      type: object
+    AutomationTokenResponse:
+      properties:
+        capabilityToken:
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+      required:
+      - capabilityToken
+      - expiresAt
+      type: object
+    ExplanationAgent:
+      properties:
+        handoffTo:
+          type: string
+        inputs:
           items:
-            type: object
-            properties:
-              name: { type: string }
-              passed: { type: boolean }
-              reason: { type: string }
-        responsibility:
-          type: object
-          properties:
-            modelAdvisory: { type: boolean }
-            humanApprovalRequired: { type: boolean }
-            executionOwner: { type: string }
-            tokenIssuer: { type: string }
-            terminalTraffic: { type: string }
-        trace:
-          type: object
-          description: Sanitized per-run agent and bounded tool activity. It excludes prompts, model responses, tokens, command bodies, secrets, and terminal streams.
-          properties:
-            schemaVersion: { type: string, enum: [v1] }
-            agentActions:
-              type: array
-              items:
-                type: object
-                properties:
-                  eventId: { type: string }
-                  stage: { type: string }
-                  fromAgent: { type: string }
-                  toAgent: { type: string }
-                  protocol: { type: string }
-                  actorType: { type: string, enum: [MODEL_ASSISTED, DETERMINISTIC] }
-                  status: { type: string, enum: [SUCCEEDED, FALLBACK, FAILED] }
-                  summary: { type: string }
-                  durationMs: { type: number }
-                  fallbackUsed: { type: boolean }
-                  occurredAt: { type: string, format: date-time }
-            toolCalls:
-              type: array
-              items:
-                type: object
-                properties:
-                  eventId: { type: string }
-                  operationId: { type: string }
-                  phase: { type: string, enum: [diagnose, remediate, verify] }
-                  selectedBy: { type: string }
-                  status: { type: string, enum: [SUCCEEDED, FAILED] }
-                  reason: { type: string }
-                  durationMs: { type: number }
-                  exitCode: { type: integer }
-                  resultDigest: { type: string }
-                  outputTruncated: { type: boolean }
-                  occurredAt: { type: string, format: date-time }
+            type: string
+          type:
+          - array
+          - 'null'
+        memory:
+          type: string
+        name:
+          type: string
+        outputs:
+          items:
+            type: string
+          type:
+          - array
+          - 'null'
+        purpose:
+          type: string
+        reasoningType:
+          type: string
+        responsibilities:
+          items:
+            type: string
+          type:
+          - array
+          - 'null'
+        tools:
+          items:
+            type: string
+          type:
+          - array
+          - 'null'
+      required:
+      - name
+      - purpose
+      - responsibilities
+      - reasoningType
+      - memory
+      - tools
+      - inputs
+      - outputs
+      - handoffTo
+      type: object
+    ExplanationAgentAction:
+      properties:
+        actorType:
+          type: string
+        durationMs:
+          type: number
+        eventId:
+          type: string
+        fallbackUsed:
+          type: boolean
+        fromAgent:
+          type: string
+        occurredAt:
+          format: date-time
+          type: string
+        protocol:
+          type: string
+        stage:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        toAgent:
+          type: string
+      required:
+      - eventId
+      - stage
+      - fromAgent
+      - toAgent
+      - protocol
+      - actorType
+      - status
+      - summary
+      - durationMs
+      - fallbackUsed
+      - occurredAt
+      type: object
+    ExplanationGuardrail:
+      properties:
+        name:
+          type: string
+        passed:
+          type: boolean
+        reason:
+          type: string
+      required:
+      - name
+      - passed
+      - reason
+      type: object
+    ExplanationModel:
+      properties:
+        awsRegion:
+          type: string
+        gatewayRoute:
+          type: string
+        maxPromptBytes:
+          type: integer
+        modelId:
+          type: string
+        plannerType:
+          type: string
+        promptTemplates:
+          additionalProperties:
+            type: string
+          type:
+          - object
+          - 'null'
+        provider:
+          type: string
+        temperature:
+          anyOf:
+          - type: number
+          - type: 'null'
+      required:
+      - provider
+      - plannerType
+      - modelId
+      - awsRegion
+      - gatewayRoute
+      - temperature
+      - maxPromptBytes
+      - promptTemplates
+      type: object
+    ExplanationResponsibility:
+      properties:
+        executionOwner:
+          type: string
+        humanApprovalRequired:
+          type: boolean
+        modelAdvisory:
+          type: boolean
+        terminalTraffic:
+          type: string
+        tokenIssuer:
+          type: string
+      required:
+      - modelAdvisory
+      - humanApprovalRequired
+      - executionOwner
+      - tokenIssuer
+      - terminalTraffic
+      type: object
+    ExplanationToolCall:
+      properties:
+        durationMs:
+          type: number
+        eventId:
+          type: string
+        exitCode:
+          type: integer
+        occurredAt:
+          format: date-time
+          type: string
+        operationId:
+          type: string
+        outputTruncated:
+          type: boolean
+        phase:
+          type: string
+        reason:
+          type: string
+        resultDigest:
+          type: string
+        selectedBy:
+          type: string
+        status:
+          type: string
+      required:
+      - eventId
+      - operationId
+      - phase
+      - selectedBy
+      - status
+      - reason
+      - durationMs
+      - exitCode
+      - resultDigest
+      - outputTruncated
+      - occurredAt
+      type: object
+    ExplanationToolDecision:
+      properties:
+        chosenBy:
+          type: string
+        operationId:
+          type: string
+        phase:
+          type: string
+        reason:
+          type: string
+      required:
+      - operationId
+      - phase
+      - chosenBy
+      - reason
+      type: object
+    ExplanationTrace:
+      properties:
+        agentActions:
+          items:
+            $ref: '#/components/schemas/ExplanationAgentAction'
+          type:
+          - array
+          - 'null'
+        schemaVersion:
+          type: string
+        toolCalls:
+          items:
+            $ref: '#/components/schemas/ExplanationToolCall'
+          type:
+          - array
+          - 'null'
+      required:
+      - schemaVersion
+      - agentActions
+      - toolCalls
+      type: object
+    ExplanationWorkflow:
+      properties:
+        catalogVersion:
+          type: string
+        diagnosticOperations:
+          items:
+            type: string
+          type:
+          - array
+          - 'null'
+        graphVersion:
+          type: string
+        planHash:
+          type: string
+        runId:
+          type: string
+        verificationOperations:
+          items:
+            type: string
+          type:
+          - array
+          - 'null'
+      required:
+      - graphVersion
+      - catalogVersion
+      - diagnosticOperations
+      - verificationOperations
+      - runId
+      - planHash
+      type: object
+    Incident:
+      properties:
+        alarmArn:
+          type: string
+        alarmName:
+          type: string
+        approvalAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        approvalDecision:
+          type: string
+        approverSubject:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        errorMessage:
+          type: string
+        evidence:
+          items:
+            $ref: '#/components/schemas/OperationResult'
+          type:
+          - array
+          - 'null'
+        explanation:
+          $ref: '#/components/schemas/IncidentExplanation'
+        hostId:
+          type: string
+        id:
+          type: string
+        plan:
+          $ref: '#/components/schemas/Plan'
+        planExpiresAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        planHash:
+          type: string
+        postIncidentReport:
+          $ref: '#/components/schemas/PostIncidentReport'
+        reason:
+          type: string
+        report:
+          type: string
+        runbookVersion:
+          type: string
+        sourceId:
+          type: string
+        state:
+          $ref: '#/components/schemas/IncidentState'
+        triage:
+          anyOf:
+          - $ref: '#/components/schemas/TriageResult'
+          - type: 'null'
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - sourceId
+      - alarmArn
+      - alarmName
+      - hostId
+      - runbookVersion
+      - state
+      - reason
+      - evidence
+      - triage
+      - plan
+      - planHash
+      - explanation
+      - planExpiresAt
+      - approverSubject
+      - approvalDecision
+      - approvalAt
+      - report
+      - postIncidentReport
+      - errorMessage
+      - createdAt
+      - updatedAt
+      type: object
+    IncidentDetail:
+      properties:
+        alarmArn:
+          type: string
+        alarmName:
+          type: string
+        approvalAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        approvalDecision:
+          type: string
+        approvalDecisions:
+          items:
+            $ref: '#/components/schemas/ApprovalDecisionAudit'
+          type:
+          - array
+          - 'null'
+        approverSubject:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        errorMessage:
+          type: string
+        evidence:
+          items:
+            $ref: '#/components/schemas/OperationResult'
+          type:
+          - array
+          - 'null'
+        explanation:
+          $ref: '#/components/schemas/IncidentExplanation'
+        hostId:
+          type: string
+        id:
+          type: string
+        plan:
+          $ref: '#/components/schemas/Plan'
+        planExpiresAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        planHash:
+          type: string
+        postIncidentReport:
+          $ref: '#/components/schemas/PostIncidentReport'
+        reason:
+          type: string
+        report:
+          type: string
+        runbookVersion:
+          type: string
+        sourceId:
+          type: string
+        state:
+          $ref: '#/components/schemas/IncidentState'
+        timeline:
+          items:
+            $ref: '#/components/schemas/IncidentEvent'
+          type:
+          - array
+          - 'null'
+        triage:
+          anyOf:
+          - $ref: '#/components/schemas/TriageResult'
+          - type: 'null'
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - sourceId
+      - alarmArn
+      - alarmName
+      - hostId
+      - runbookVersion
+      - state
+      - reason
+      - evidence
+      - triage
+      - plan
+      - planHash
+      - explanation
+      - planExpiresAt
+      - approverSubject
+      - approvalDecision
+      - approvalAt
+      - report
+      - postIncidentReport
+      - errorMessage
+      - createdAt
+      - updatedAt
+      - timeline
+      - approvalDecisions
+      type: object
+    IncidentEvent:
+      properties:
+        actor:
+          type: string
+        alertId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        eventType:
+          type: string
+        id:
+          type: string
+        incidentId:
+          type: string
+        message:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type:
+          - object
+          - 'null'
+      required:
+      - id
+      - incidentId
+      - alertId
+      - eventType
+      - actor
+      - message
+      - metadata
+      - createdAt
+      type: object
+    IncidentEventListResponse:
+      properties:
+        events:
+          items:
+            $ref: '#/components/schemas/IncidentEvent'
+          type:
+          - array
+          - 'null'
+        nextCursor:
+          type: string
+      required:
+      - events
+      type: object
+    IncidentListResponse:
+      properties:
+        incidents:
+          items:
+            $ref: '#/components/schemas/IncidentSummary'
+          type:
+          - array
+          - 'null'
+        nextCursor:
+          type: string
+      required:
+      - incidents
+      type: object
+    IncidentState:
+      type: string
+      enum:
+      - DIAGNOSING
+      - AWAITING_APPROVAL
+      - EXECUTING
+      - COMPLETED
+      - REJECTED
+      - RECOVERED
+      - FAILED
+    IncidentSummary:
+      properties:
+        alarmName:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        errorMessage:
+          type: string
+        hostId:
+          type: string
+        id:
+          type: string
+        planExpiresAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        planHash:
+          type: string
+        state:
+          $ref: '#/components/schemas/IncidentState'
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - alarmName
+      - hostId
+      - state
+      - planHash
+      - planExpiresAt
+      - createdAt
+      - updatedAt
+      - errorMessage
+      type: object
+    ManagedAlert:
+      properties:
+        alarmArn:
+          type: string
+        alarmName:
+          type: string
+        cloudwatchState:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        errorSummary:
+          type: string
+        groupKey:
+          type: string
+        grouped:
+          type: boolean
+        hostId:
+          type: string
+        id:
+          type: string
+        incidentId:
+          type: string
+        occurredAt:
+          format: date-time
+          type: string
+        reason:
+          type: string
+        sourceId:
+          type: string
+        sourceType:
+          type: string
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - sourceId
+      - sourceType
+      - alarmArn
+      - alarmName
+      - cloudwatchState
+      - hostId
+      - reason
+      - status
+      - groupKey
+      - incidentId
+      - grouped
+      - errorSummary
+      - occurredAt
+      - createdAt
+      - updatedAt
+      type: object
+    OperationResult:
+      properties:
+        exitCode:
+          type: integer
+        operationId:
+          type: string
+        stderr:
+          type: string
+        stdout:
+          type: string
+      required:
+      - operationId
+      - stdout
+      - stderr
+      - exitCode
+      type: object
+    Plan:
+      properties:
+        actions:
+          items:
+            $ref: '#/components/schemas/Action'
+          type:
+          - array
+          - 'null'
+        rationale:
+          type: string
+        summary:
+          type: string
+      required:
+      - summary
+      - rationale
+      - actions
+      type: object
+    PostIncidentReport:
+      properties:
+        actionTaken:
+          type: string
+        durationSeconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+        finalState:
+          type: string
+        resolvedAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        rootCauseSummary:
+          type: string
+        startedAt:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+        verificationSummary:
+          type: string
+      required:
+      - rootCauseSummary
+      - actionTaken
+      - verificationSummary
+      - finalState
+      type: object
+    TriageResult:
+      properties:
+        category:
+          type: string
+        priority:
+          type: string
+        rationale:
+          type: string
+        summary:
+          type: string
+      required:
+      - priority
+      - category
+      - summary
+      - rationale
+      type: object
+  responses:
+    Error:
+      description: Invalid request, authorization denial, or service failure; the HTTP status identifies the category.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  parameters:
+    APIVersion:
+      name: x-api-version
+      in: header
+      required: true
+      schema:
+        type: string
+        enum:
+        - '1'
+      description: Required on business endpoints. Missing or unsupported values return 400.
+servers:
+- url: https://api.ddm.keiyam.me
+  description: AWS dev public origin.
+- url: http://localhost:8092
+  description: Direct service address; public services are accessed through the authenticated ALB.
