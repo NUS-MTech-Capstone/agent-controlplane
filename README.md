@@ -113,7 +113,7 @@ pool groups such as `admin` retain the same canonical authorization boundary.
 Approval checks the exact stored `planHash`, records an approval decision, and
 requests only the single approved operation from the code-reviewed v1
 remediation catalog through the MCP Tool Gateway, followed by bounded
-verification operations. It no longer calls Proxy Dataplane directly.
+verification operations. The Tool Gateway mediates operation execution.
 Automation authority still comes from STS capability tokens and Session Manager run
 assignment metadata; managers approve plans, they do not create runtime
 actions.
@@ -147,42 +147,29 @@ and live terminal traffic still bypasses Agent Control Plane.
 
 ## Development
 
-R12 executor evaluations live in `internal/service/r12_evaluation_test.go`.
-They exercise the real service with simulated tools, authorization and session
-metadata; no test invokes live remediation. `go test -json ./internal/service
--run '^TestR12RoleCases$' -count=1` emits `R12_RECORD` JSON lines consumed by
-the sibling Incident Agent evaluation runner. Records contain synthetic
-expected/actual outcomes for all five behavior categories, without tokens or
-raw tool output. See `../documentation/R12_SIX_ROLE_EVALUATION.md` for results.
+Executor evaluations in `internal/service/r12_evaluation_test.go` exercise the
+service with simulated tools, authorization and session metadata. Run
+`go test -json ./internal/service -run '^TestR12RoleCases$' -count=1` to emit
+sanitized `R12_RECORD` results for the sibling Incident Agent evaluation runner.
+The separately supplied workspace document
+`capstone/documentation/R12_SIX_ROLE_EVALUATION.md` contains the evaluation results.
 
-After execution validation succeeds, automation-run cleanup now executes on
-both successful and failed remediation paths, including uncertain transport
-responses. Mutations are still never automatically retried. Cleanup uses a
-separate context bounded by `OPERATION_TIMEOUT_SECONDS`, so request cancellation
-does not skip it. `AutomationRunClosed` is recorded only after successful close;
-`AutomationRunCloseFailed` records unavailable cleanup, with run TTL as the
-fallback. Rejected execution requests do not close another active run.
-
-This change adds no endpoint, payload or schema requirement. Incident Agent
-and Agent Control Plane images can be promoted independently through the normal
-immutable-image GitOps flow; the evaluation itself does not deploy changes.
+Automation runs close after execution on both success and failure, using a
+separate context bounded by `OPERATION_TIMEOUT_SECONDS`. Cleanup records
+`AutomationRunClosed` or `AutomationRunCloseFailed`; run TTL provides expiry.
+Rejected execution requests preserve any other active run.
 
 ```bash
 go test ./...
 go run ./cmd/server
 ```
 
-## API contract verification
+## API contract and CI
 
-`api/openapi.yaml` is the checked-in HTTP contract, served byte-for-byte at
-`GET /openapi.yaml`. CI validates it with `openapi-spec-validator==0.9.0`.
-Handler tests validate representative success and error responses against its
-schemas, including missing and unsupported API versions. Business HTTP calls
-require `x-api-version: 1`; the specification declares route exemptions and
-any transport-specific alternatives. Run the repository test suite when
-changing handlers or response models, and update the contract in the same PR.
+[OpenAPI contract](api/openapi.yaml), served byte-for-byte at `GET /openapi.yaml`.
+CI validates it with `openapi-spec-validator==0.9.0`; handler tests check success,
+error and API-version responses. Update the specification alongside handler changes.
 
-The Image workflow runs only after successful CI for a push to `main`. It builds
-the tested source SHA, retains that SHA as a traceability tag, and promotes the
-build's `sha256` digest through a Kubernetes PR. Promotion requires the digest;
-Argo CD deploys that immutable reference after the GitOps PR is merged.
+After successful `main` CI, the Image workflow builds the tested source SHA
+and opens a Kubernetes promotion PR with its immutable image digest. Argo CD
+deploys after that PR is merged; the commit tag provides source traceability.
